@@ -1,32 +1,32 @@
-/** Sub0h264 — CAVLC entropy decoder
+/** Sub0h264 ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â CAVLC entropy decoder
  *
  *  Context-Adaptive Variable-Length Coding for H.264 Baseline profile.
  *  Decodes macroblock syntax elements: mb_type, prediction modes,
  *  motion vectors, CBP, QP delta, and residual coefficients.
  *
- *  Reference: ITU-T H.264 §9.2
+ *  Reference: ITU-T H.264 Ãƒâ€šÃ‚Â§9.2
  *
  *  Spec-annotated review (2026-04-09):
- *    §9.2 decode step sequence verified: [CHECKED §9.2]
- *      Step 1: coeff_token → (TotalCoeff, TrailingOnes)  [CHECKED §9.2.1]
- *      Step 2: trailing_ones_sign_flag (sign: 0→+1, 1→-1) [CHECKED §9.2.2]
- *      Step 3: levels (reverse scan order, suffixLen adaptation) [CHECKED §9.2.2]
- *      Step 4: total_zeros (gated on TotalCoeff < maxNumCoeff)  [CHECKED §9.2.3]
- *      Step 5: run_before (not decoded for last coeff / zerosLeft==0) [CHECKED §9.2.3]
- *      Step 6: position reconstruction from runs [CHECKED §9.2.4]
+ *    Ãƒâ€šÃ‚Â§9.2 decode step sequence verified: [CHECKED Ãƒâ€šÃ‚Â§9.2]
+ *      Step 1: coeff_token ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ (TotalCoeff, TrailingOnes)  [CHECKED Ãƒâ€šÃ‚Â§9.2.1]
+ *      Step 2: trailing_ones_sign_flag (sign: 0ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢+1, 1ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢-1) [CHECKED Ãƒâ€šÃ‚Â§9.2.2]
+ *      Step 3: levels (reverse scan order, suffixLen adaptation) [CHECKED Ãƒâ€šÃ‚Â§9.2.2]
+ *      Step 4: total_zeros (gated on TotalCoeff < maxNumCoeff)  [CHECKED Ãƒâ€šÃ‚Â§9.2.3]
+ *      Step 5: run_before (not decoded for last coeff / zerosLeft==0) [CHECKED Ãƒâ€šÃ‚Â§9.2.3]
+ *      Step 6: position reconstruction from runs [CHECKED Ãƒâ€šÃ‚Â§9.2.4]
  *
  *  Validation status:
  *    coeff_token:    Tables 9-5(a)-(e) regenerated from libavc, verified
  *                    against spec. nC>=8 fixed-code decode confirmed correct.
- *                    nC ranges: <0=chromaDC, 0-1, 2-3, 4-7, >=8. [CHECKED §9.2.1]
- *    level decode:   §9.2.2 suffixLen adaptation uses two INDEPENDENT if
- *                    statements (not if/else-if). [CHECKED §9.2.2]
- *                    First non-trailing level ±1 offset when T1<3. [CHECKED §9.2.2]
- *                    suffixLen init: tc>10&&t1<3→1, else→0. [CHECKED §9.2.2]
+ *                    nC ranges: <0=chromaDC, 0-1, 2-3, 4-7, >=8. [CHECKED Ãƒâ€šÃ‚Â§9.2.1]
+ *    level decode:   Ãƒâ€šÃ‚Â§9.2.2 suffixLen adaptation uses two INDEPENDENT if
+ *                    statements (not if/else-if). [CHECKED Ãƒâ€šÃ‚Â§9.2.2]
+ *                    First non-trailing level Ãƒâ€šÃ‚Â±1 offset when T1<3. [CHECKED Ãƒâ€šÃ‚Â§9.2.2]
+ *                    suffixLen init: tc>10&&t1<3ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢1, elseÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢0. [CHECKED Ãƒâ€šÃ‚Â§9.2.2]
  *    total_zeros:    Table 9-7 verified prefix-free at compile time
- *                    (static_assert in test_spec_tables.cpp). [CHECKED §9.2.3]
- *    run_before:     Table 9-10 verified prefix-free at compile time. [CHECKED §9.2.3]
- *    chroma DC:      Zigzag identity for maxCoeff<=4. [CHECKED §8.5.6]
+ *                    (static_assert in test_spec_tables.cpp). [CHECKED Ãƒâ€šÃ‚Â§9.2.3]
+ *    run_before:     Table 9-10 verified prefix-free at compile time. [CHECKED Ãƒâ€šÃ‚Â§9.2.3]
+ *    chroma DC:      Zigzag identity for maxCoeff<=4. [CHECKED Ãƒâ€šÃ‚Â§8.5.6]
  *
  *  SPDX-License-Identifier: MIT
  */
@@ -50,19 +50,19 @@ namespace sub0h264 {
 /// Maximum coefficients in a 4x4 block.
 inline constexpr uint32_t cMaxCoeff4x4 = 16U;
 
-/// Maximum trailing ones — ITU-T H.264 §9.2.1.
+/// Maximum trailing ones ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â ITU-T H.264 Ãƒâ€šÃ‚Â§9.2.1.
 inline constexpr uint32_t cMaxTrailingOnes = 3U;
 
-/// Maximum suffix length for level decoding — ITU-T H.264 §9.2.2.
+/// Maximum suffix length for level decoding ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â ITU-T H.264 Ãƒâ€šÃ‚Â§9.2.2.
 inline constexpr uint32_t cMaxSuffixLength = 6U;
 
-// ── Coeff token decoding — ITU-T H.264 §9.2.1 ─────────────────────────
+// ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Coeff token decoding ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â ITU-T H.264 Ãƒâ€šÃ‚Â§9.2.1 ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
 
 /** Result of coeff_token VLC decoding. */
 struct CoeffToken
 {
     uint8_t totalCoeff;    ///< Number of non-zero coefficients [0-16]
-    uint8_t trailingOnes;  ///< Number of trailing ±1 coefficients [0-3]
+    uint8_t trailingOnes;  ///< Number of trailing Ãƒâ€šÃ‚Â±1 coefficients [0-3]
 };
 
 /** Match a VLC code against the bitstream.
@@ -105,6 +105,13 @@ inline CoeffToken matchCoeffTokenTable(BitReader& br, uint32_t tableIdx) noexcep
         }
     }
 
+    if (bestSize == 255U)
+    {
+        // Invalid coeff_token VLC: bounded fallback.
+        br.skipBits(1U);
+        return { 0U, 0U };
+    }
+
     br.skipBits(bestSize);
     return best;
 }
@@ -118,13 +125,13 @@ inline CoeffToken matchCoeffTokenTable(BitReader& br, uint32_t tableIdx) noexcep
  *  @param nC   Context value [0-16, or -1 for chroma DC]
  *  @return Decoded coeff_token
  *
- *  Reference: ITU-T H.264 §9.2.1, Tables 9-5(a-e)
+ *  Reference: ITU-T H.264 Ãƒâ€šÃ‚Â§9.2.1, Tables 9-5(a-e)
  */
 inline CoeffToken decodeCoeffToken(BitReader& br, int32_t nC) noexcept
 {
     if (nC < 0)
     {
-        // Chroma DC: Table 9-5(d) — max 4 coefficients
+        // Chroma DC: Table 9-5(d) ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â max 4 coefficients
         uint32_t peekBuf = br.peekBits(8U);
         CoeffToken best = { 0U, 0U };
         uint8_t bestSize = 255U;
@@ -148,6 +155,13 @@ inline CoeffToken decodeCoeffToken(BitReader& br, int32_t nC) noexcept
                 }
             }
         }
+        if (bestSize == 255U)
+        {
+            // Invalid chroma-DC coeff_token VLC: bounded fallback.
+            br.skipBits(1U);
+            return { 0U, 0U };
+        }
+
         br.skipBits(bestSize);
         return best;
     }
@@ -155,12 +169,12 @@ inline CoeffToken decodeCoeffToken(BitReader& br, int32_t nC) noexcept
     if (nC >= 8)
     {
         // Table 9-5(e): fixed 6-bit code for nC >= 8.
-        // ITU-T H.264 Table 9-5(e): code 000011 → (tc=0, t1=0).
+        // ITU-T H.264 Table 9-5(e): code 000011 ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ (tc=0, t1=0).
         // All other codes: tc = (code >> 2) + 1, t1 = code & 3.
         // Reference: libavc ih264d_cavlc_parse4x4coeff_n8(), line 1305.
         uint32_t code = br.readBits(6U);
         CoeffToken ct;
-        /// Special code: 000011 (=3) maps to tc=0 — ITU-T H.264 Table 9-5(e).
+        /// Special code: 000011 (=3) maps to tc=0 ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â ITU-T H.264 Table 9-5(e).
         static constexpr uint32_t cNc8ZeroCode = 3U;
         if (code == cNc8ZeroCode)
         {
@@ -186,15 +200,15 @@ inline CoeffToken decodeCoeffToken(BitReader& br, int32_t nC) noexcept
     return matchCoeffTokenTable(br, tableIdx);
 }
 
-// ── Level decoding — ITU-T H.264 §9.2.2 ────────────────────────────────
+// ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Level decoding ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â ITU-T H.264 Ãƒâ€šÃ‚Â§9.2.2 ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
 
 /** Decode one coefficient level value from the bitstream.
  *
  *  Reads level_prefix (leading zeros + 1) and level_suffix, computes
- *  levelCode per ITU-T H.264 §9.2.2, converts to signed level.
+ *  levelCode per ITU-T H.264 Ãƒâ€šÃ‚Â§9.2.2, converts to signed level.
  *
- *  NOTE: suffixLen is NOT updated here — the caller must update it
- *  after applying the ±1 trailing-ones adjustment, so the adaptation
+ *  NOTE: suffixLen is NOT updated here ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â the caller must update it
+ *  after applying the Ãƒâ€šÃ‚Â±1 trailing-ones adjustment, so the adaptation
  *  threshold uses the correct final magnitude.
  *
  *  @param br         Bitstream reader
@@ -203,8 +217,12 @@ inline CoeffToken decodeCoeffToken(BitReader& br, int32_t nC) noexcept
  */
 inline int32_t decodeLevel(BitReader& br, uint32_t suffixLen) noexcept
 {
-    /// Count leading zeros → level_prefix — ITU-T H.264 §9.2.2.1, Table 9-6.
+    /// Count leading zeros ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ level_prefix ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â ITU-T H.264 Ãƒâ€šÃ‚Â§9.2.2.1, Table 9-6.
     /// Use CLZ on peeked bits to avoid per-bit loop.
+    // Malformed/truncated CAVLC must not underflow remaining-bit arithmetic.
+    if (br.bitOffset() >= br.totalBits())
+        return 0;
+
     uint32_t remaining = br.totalBits() - br.bitOffset();
     uint32_t peekN = (remaining < 32U) ? remaining : 32U;
     uint32_t bits = br.peekBits(peekN);
@@ -231,10 +249,14 @@ inline int32_t decodeLevel(BitReader& br, uint32_t suffixLen) noexcept
         br.skipBits(prefix + 1U); // skip zeros + the '1' bit
     }
 
-    /// Compute levelSuffixSize — ITU-T H.264 §9.2.2.
+    /// Compute levelSuffixSize ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â ITU-T H.264 Ãƒâ€šÃ‚Â§9.2.2.
     ///   Normal:            levelSuffixSize = suffixLength
     ///   prefix==14, sL==0: levelSuffixSize = 4
     ///   prefix>=15:        levelSuffixSize = prefix - 3
+    // Reject malformed level_prefix values before 32-bit shift arithmetic.
+    if (prefix > 31U)
+        return 0;
+
     uint32_t suffixSize;
     if (prefix == 14U && suffixLen == 0U)
         suffixSize = 4U;
@@ -248,7 +270,7 @@ inline int32_t decodeLevel(BitReader& br, uint32_t suffixLen) noexcept
     if (suffixSize > 0U)
         suffix = br.readBits(suffixSize);
 
-    /// Compute levelCode — ITU-T H.264 §9.2.2.
+    /// Compute levelCode ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â ITU-T H.264 Ãƒâ€šÃ‚Â§9.2.2.
     /// levelCode = (min(15, level_prefix) << suffixLength) + level_suffix
     int32_t levelCode = static_cast<int32_t>(
         (static_cast<uint32_t>(prefix < 15U ? prefix : 15U) << suffixLen) + suffix);
@@ -258,21 +280,21 @@ inline int32_t decodeLevel(BitReader& br, uint32_t suffixLen) noexcept
     if (prefix >= 16U)
         levelCode += static_cast<int32_t>((1U << (prefix - 3U)) - 4096U);
 
-    /// Convert to signed — ITU-T H.264 §9.2.2.
-    /// levelCode even → positive, odd → negative.
+    /// Convert to signed ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â ITU-T H.264 Ãƒâ€šÃ‚Â§9.2.2.
+    /// levelCode even ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ positive, odd ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ negative.
     int32_t absLevel = (levelCode + 2) >> 1;
     int32_t sign = (levelCode & 1) ? -1 : 1;
     return absLevel * sign;
 }
 
-// ── Total zeros decoding — ITU-T H.264 §9.2.3 ──────────────────────────
+// ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Total zeros decoding ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â ITU-T H.264 Ãƒâ€šÃ‚Â§9.2.3 ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
 
 /** Decode total_zeros for 4x4 block using spec VLC tables.
  *  @param br          Bitstream reader
  *  @param totalCoeff  Number of non-zero coefficients [1-15]
  *  @return Total number of zero coefficients before the last non-zero
  *
- *  Reference: ITU-T H.264 §9.2.3, Tables 9-7/9-8
+ *  Reference: ITU-T H.264 Ãƒâ€šÃ‚Â§9.2.3, Tables 9-7/9-8
  */
 inline uint32_t decodeTotalZeros(BitReader& br, uint32_t totalCoeff) noexcept
 {
@@ -313,7 +335,7 @@ inline uint32_t decodeTotalZeros(BitReader& br, uint32_t totalCoeff) noexcept
  *  @param totalCoeff  Number of non-zero coefficients [1-3]
  *  @return Total number of zero coefficients
  *
- *  Reference: ITU-T H.264 §9.2.3, Table 9-9
+ *  Reference: ITU-T H.264 Ãƒâ€šÃ‚Â§9.2.3, Table 9-9
  */
 inline uint32_t decodeTotalZerosChromaDC(BitReader& br, uint32_t totalCoeff) noexcept
 {
@@ -350,14 +372,14 @@ inline uint32_t decodeTotalZerosChromaDC(BitReader& br, uint32_t totalCoeff) noe
     return 0U;
 }
 
-// ── Run before decoding — ITU-T H.264 §9.2.3 ───────────────────────────
+// ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Run before decoding ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â ITU-T H.264 Ãƒâ€šÃ‚Â§9.2.3 ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
 
 /** Decode run_before (zeros before a coefficient) using spec VLC tables.
  *  @param br         Bitstream reader
  *  @param zerosLeft  Remaining zeros to distribute
  *  @return Run length before this coefficient
  *
- *  Reference: ITU-T H.264 §9.2.3, Table 9-10
+ *  Reference: ITU-T H.264 Ãƒâ€šÃ‚Â§9.2.3, Table 9-10
  */
 inline uint32_t decodeRunBefore(BitReader& br, uint32_t zerosLeft) noexcept
 {
@@ -416,7 +438,7 @@ inline uint32_t decodeRunBefore(BitReader& br, uint32_t zerosLeft) noexcept
     return 0U;
 }
 
-// ── 4x4 residual block decoder — ITU-T H.264 §9.2 ─────────────────────
+// ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ 4x4 residual block decoder ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â ITU-T H.264 Ãƒâ€šÃ‚Â§9.2 ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
 
 /// Decoded residual coefficients for one 4x4 block.
 struct ResidualBlock4x4
@@ -444,7 +466,7 @@ inline Result decodeResidualBlock4x4(BitReader& br, int32_t nC,
                                       ResidualBlock4x4& block,
                                       [[maybe_unused]] const DecodeTrace* trace = nullptr) noexcept
 {
-    // §9.2 Step 2: coeff_token → TotalCoeff, TrailingOnes [CHECKED §9.2.1]
+    // Ãƒâ€šÃ‚Â§9.2 Step 2: coeff_token ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ TotalCoeff, TrailingOnes [CHECKED Ãƒâ€šÃ‚Â§9.2.1]
     // ~60% of blocks in typical P-frames have totalCoeff==0, so deferring
     // the 32-byte memset saves significant work on in-order cores.
     CoeffToken ct = decodeCoeffToken(br, nC);
@@ -463,7 +485,7 @@ inline Result decodeResidualBlock4x4(BitReader& br, int32_t nC,
     // Zero coeffs before scatter-writing non-zero positions via zigzag.
     std::memset(block.coeffs, 0, sizeof(block.coeffs));
 
-    // §9.2 Step 3a: trailing_ones_sign_flag — sign: 0→+1, 1→-1 [CHECKED §9.2.2]
+    // Ãƒâ€šÃ‚Â§9.2 Step 3a: trailing_ones_sign_flag ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â sign: 0ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢+1, 1ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢-1 [CHECKED Ãƒâ€šÃ‚Â§9.2.2]
     // FM-2: bit=0 is POSITIVE (inverted from intuition). Verified. [CHECKED FM-2]
     int16_t levels[16];
     uint32_t levelIdx = 0U;
@@ -479,8 +501,8 @@ inline Result decodeResidualBlock4x4(BitReader& br, int32_t nC,
     // This trace is placed early but the actual dump happens after placement.
 #endif
 
-    // §9.2 Step 3a: remaining levels (reverse scan order) [CHECKED §9.2.2]
-    // suffixLen init: tc>10 && t1<3 → 1, else → 0 [CHECKED §9.2.2]
+    // Ãƒâ€šÃ‚Â§9.2 Step 3a: remaining levels (reverse scan order) [CHECKED Ãƒâ€šÃ‚Â§9.2.2]
+    // suffixLen init: tc>10 && t1<3 ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ 1, else ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ 0 [CHECKED Ãƒâ€šÃ‚Â§9.2.2]
     uint32_t suffixLen = 0U;
     if (ct.totalCoeff > 10U && ct.trailingOnes < cMaxTrailingOnes)
         suffixLen = 1U;
@@ -489,8 +511,8 @@ inline Result decodeResidualBlock4x4(BitReader& br, int32_t nC,
     {
         int32_t level = decodeLevel(br, suffixLen);
 
-        /// First non-trailing level has ±1 offset when trailingOnes < 3
-        /// — ITU-T H.264 §9.2.2. Applied BEFORE suffixLength adaptation
+        /// First non-trailing level has Ãƒâ€šÃ‚Â±1 offset when trailingOnes < 3
+        /// ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â ITU-T H.264 Ãƒâ€šÃ‚Â§9.2.2. Applied BEFORE suffixLength adaptation
         /// so the threshold comparison uses the correct final magnitude.
         if (i == ct.trailingOnes && ct.trailingOnes < cMaxTrailingOnes)
         {
@@ -503,7 +525,7 @@ inline Result decodeResidualBlock4x4(BitReader& br, int32_t nC,
             trace->onCavlcLevel(levelIdx - 1U, level);
 #endif
 
-        /// Update suffixLength — ITU-T H.264 §9.2.2.
+        /// Update suffixLength ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â ITU-T H.264 Ãƒâ€šÃ‚Â§9.2.2.
         /// Step 1: if suffixLength is 0, unconditionally set to 1.
         /// Step 2: if |level| exceeds threshold for CURRENT suffixLength,
         ///         increment suffixLength.
@@ -518,13 +540,13 @@ inline Result decodeResidualBlock4x4(BitReader& br, int32_t nC,
             ++suffixLen;
     }
 
-    // §9.2 Step 3b: total_zeros — ONLY if TotalCoeff < maxNumCoeff [CHECKED §9.2.3]
+    // Ãƒâ€šÃ‚Â§9.2 Step 3b: total_zeros ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â ONLY if TotalCoeff < maxNumCoeff [CHECKED Ãƒâ€šÃ‚Â§9.2.3]
     // FM-3: if TotalCoeff == maxNumCoeff, do NOT read VLC. [CHECKED FM-3]
     uint32_t totalZeros = 0U;
     if (ct.totalCoeff < maxCoeff)
     {
         /// Chroma DC blocks (maxCoeff=4) use a separate total_zeros table
-        /// — ITU-T H.264 Table 9-9 (2x2 block, 3 sub-tables for TC 1-3).
+        /// ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â ITU-T H.264 Table 9-9 (2x2 block, 3 sub-tables for TC 1-3).
         static constexpr uint32_t cChromaDcMaxCoeff = 4U;
 #if SUB0H264_TRACE
         uint32_t tzBitBefore = br.bitOffset();
@@ -534,7 +556,7 @@ inline Result decodeResidualBlock4x4(BitReader& br, int32_t nC,
         else
         {
             totalZeros = decodeTotalZeros(br, ct.totalCoeff);
-            // Clamp to actual block size — §9.2.3: total_zeros <= maxNumCoeff - totalCoeff.
+            // Clamp to actual block size ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â Ãƒâ€šÃ‚Â§9.2.3: total_zeros <= maxNumCoeff - totalCoeff.
             // Table 9-7 entries go up to 16-tc, but chroma AC has maxCoeff=15.
             uint32_t maxTz = maxCoeff - ct.totalCoeff;
             if (totalZeros > maxTz)
@@ -554,9 +576,9 @@ inline Result decodeResidualBlock4x4(BitReader& br, int32_t nC,
 #endif
     }
 
-    // §9.2 Step 3b: run_before + §9.2.4 position reconstruction [CHECKED §9.2.3/§9.2.4]
-    // FM-3: last coeff (i==tc-1) → run = zerosLeft, do NOT read VLC. [CHECKED FM-3]
-    // FM-3: zerosLeft==0 → do NOT read VLC. [CHECKED FM-3]
+    // Ãƒâ€šÃ‚Â§9.2 Step 3b: run_before + Ãƒâ€šÃ‚Â§9.2.4 position reconstruction [CHECKED Ãƒâ€šÃ‚Â§9.2.3/Ãƒâ€šÃ‚Â§9.2.4]
+    // FM-3: last coeff (i==tc-1) ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ run = zerosLeft, do NOT read VLC. [CHECKED FM-3]
+    // FM-3: zerosLeft==0 ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ do NOT read VLC. [CHECKED FM-3]
     uint32_t zerosLeft = totalZeros;
     uint32_t coeffIdx = ct.totalCoeff + totalZeros - 1U + startIdx;
 
@@ -577,7 +599,7 @@ inline Result decodeResidualBlock4x4(BitReader& br, int32_t nC,
             run = zerosLeft;
         }
 
-        // Map scan position to raster position — ITU-T H.264 §8.5.6.
+        // Map scan position to raster position ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â ITU-T H.264 Ãƒâ€šÃ‚Â§8.5.6.
         // For 4x4 blocks (maxCoeff=16 or 15): use zigzag scan table.
         // For chroma DC 2x2 blocks (maxCoeff=4): identity mapping (no zigzag).
         // Reference: libavc uses pu1_inv_scan = {0,1,2,3} for chroma DC.
@@ -592,14 +614,14 @@ inline Result decodeResidualBlock4x4(BitReader& br, int32_t nC,
     }
 
 #if SUB0H264_TRACE
-    // Dump raw levels for debugging — controlled by a static call counter
+    // Dump raw levels for debugging ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â controlled by a static call counter
     static uint32_t sResidualCallCount = 0U;
     ++sResidualCallCount;
     // Block 11 of MB 9 is the 2nd residual block call for MB 9
     // (block 10 has TC=0 so decodeResidualBlock returns early at TC=0 check,
     //  but the call still increments this counter)
-    // MB 0-8 = 9 MBs × 1 DC block each = 9 calls (some with TC=0)
-    // MB 5 has cbpC=1 → 2 chroma DC blocks = +2 calls
+    // MB 0-8 = 9 MBs ÃƒÆ’Ã¢â‚¬â€ 1 DC block each = 9 calls (some with TC=0)
+    // MB 5 has cbpC=1 ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ 2 chroma DC blocks = +2 calls
     // Total before MB 9: ~11 calls
     // MB 9: block 10 (TC=0) = 1 call, block 11 (TC=16) = 2nd call
     if (ct.totalCoeff > 0U)
@@ -618,9 +640,9 @@ inline Result decodeResidualBlock4x4(BitReader& br, int32_t nC,
     return Result::Ok;
 }
 
-// ── Macroblock types — ITU-T H.264 Tables 7-11, 7-13 ───────────────────
+// ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Macroblock types ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â ITU-T H.264 Tables 7-11, 7-13 ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
 
-/// I-slice macroblock types — ITU-T H.264 Table 7-11.
+/// I-slice macroblock types ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â ITU-T H.264 Table 7-11.
 enum class IMbType : uint8_t
 {
     I_4x4    = 0U,
@@ -653,7 +675,7 @@ enum class IMbType : uint8_t
 
 /** Extract I_16x16 macroblock properties from mb_type.
  *  For I_16x16 types (1-24): mb_type = 1 + predMode + cbpChroma*4 + cbpLuma12*12.
- *  where cbpLuma12=0→cbpLuma=0, cbpLuma12=1→cbpLuma=15.
+ *  where cbpLuma12=0ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢cbpLuma=0, cbpLuma12=1ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢cbpLuma=15.
  *  Reference: ITU-T H.264 Table 7-11. [CHECKED Table 7-11]
  */
 inline bool isI16x16(uint8_t mbType) noexcept { return mbType >= 1U && mbType <= 24U; }
@@ -661,7 +683,7 @@ inline uint8_t i16x16PredMode(uint8_t mbType) noexcept { return (mbType - 1U) % 
 inline uint8_t i16x16CbpLuma(uint8_t mbType) noexcept { return ((mbType - 1U) / 4U < 3U) ? 0U : 15U; }
 inline uint8_t i16x16CbpChroma(uint8_t mbType) noexcept { return ((mbType - 1U) / 4U) % 3U; }
 
-/// P-slice macroblock types — ITU-T H.264 Table 7-13.
+/// P-slice macroblock types ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â ITU-T H.264 Table 7-13.
 enum class PMbType : uint8_t
 {
     P_L0_16x16  = 0U,
@@ -671,7 +693,7 @@ enum class PMbType : uint8_t
     P_8x8ref0   = 4U,
 };
 
-// ── Macroblock data — decoded syntax elements for one MB ────────────────
+// ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Macroblock data ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â decoded syntax elements for one MB ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
 
 /// Decoded macroblock data from CAVLC parsing.
 struct MacroblockData

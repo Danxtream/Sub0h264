@@ -75,3 +75,16 @@ docs/benchmark_report.md
 
 # Reference code (cloned for study, not part of project)
 docs/reference/
+
+testlog.txt
+
+# Local build/test artifacts
+build/
+testlog.txt
+g2_release_test.txt
+g2_testlog.txt
+
+build/
+testlog.txt
+g2_release_test.txt
+g2_testlog.txt

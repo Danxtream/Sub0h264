@@ -1,4 +1,4 @@
-/** Sub0h264 — H.264 decoder pipeline
+/** Sub0h264 â€” H.264 decoder pipeline
  *
  *  Wires together NAL parsing, parameter sets, slice headers,
  *  CAVLC entropy decoding, intra prediction, and inverse transform
@@ -61,7 +61,7 @@ enum class DecodeStatus : int32_t
  *  return statement (e.g. `return DecodeStatus::Error` or `return false`).
  *
  *  Usage:
- *      SUB0H264_UNSUPPORTED("B-slices not implemented — §7.3.4");
+ *      SUB0H264_UNSUPPORTED("B-slices not implemented â€” Â§7.3.4");
  *      return DecodeStatus::Error;
  *
  *  This pattern preserves the existing assert-on-debug discipline while
@@ -157,6 +157,24 @@ public:
 
     /** @return Number of frames decoded so far. */
     uint32_t frameCount() const noexcept { return frameCount_; }
+    // TEMP H.264 firmware diagnostic.
+    uint32_t diagStage() const noexcept { return diagStage_; }
+    uint32_t diagMbEntered() const noexcept { return diagMbEntered_; }
+    uint32_t diagMbCompleted() const noexcept { return diagMbCompleted_; }
+    uint32_t diagBitOffset() const noexcept { return diagBitOffset_; }
+
+    /** DPB memory diagnostics for constrained integrations. */
+    uint32_t dpbFrameCapacity() const noexcept { return dpb_.frameCapacity(); }
+    uint32_t dpbAllocatedFrameCount() const noexcept { return dpb_.allocatedFrameCount(); }
+    uint32_t dpbAllocatedFrameBytes() const noexcept { return dpb_.allocatedFrameBytes(); }
+    uint32_t allocationFailedTag() const noexcept
+    {
+        return static_cast<uint32_t>(allocationFailure_.tag);
+    }
+    uint32_t allocationFailedSize() const noexcept
+    {
+        return static_cast<uint32_t>(allocationFailure_.size);
+    }
 
     /** Set trace filter for debugging. Printf requires SUB0H264_TRACE=1 build.
      *  Callback tracing is always available. */
@@ -188,31 +206,37 @@ private:
     Dpb dpb_;
     uint32_t frameCount_ = 0U;
     bool dpbInitialized_ = false;
+    AllocationFailure allocationFailure_{};
 
+    // TEMP H.264 firmware diagnostic.
+    volatile uint32_t diagStage_ = 0U;
+    volatile uint32_t diagMbEntered_ = UINT32_MAX;
+    volatile uint32_t diagMbCompleted_ = UINT32_MAX;
+    volatile uint32_t diagBitOffset_ = 0U;
     // Per-frame MB context: non-zero coefficient counts for CAVLC context
     std::vector<uint8_t> nnzLuma_;    // [mbIdx * 16 + blkIdx]
     std::vector<uint8_t> nnzCb_;      // [mbIdx * 4 + blkIdx]
     std::vector<uint8_t> nnzCr_;      // [mbIdx * 4 + blkIdx]
 
-    // Per-MB luma QP after mb_qp_delta accumulation — ITU-T H.264 §7.4.5.
-    // Used by deblocking filter: boundary edges require QP averaging (§8.7.2.2).
+    // Per-MB luma QP after mb_qp_delta accumulation â€” ITU-T H.264 Â§7.4.5.
+    // Used by deblocking filter: boundary edges require QP averaging (Â§8.7.2.2).
     std::vector<int32_t> mbQps_;      // [mbIdx]
 
-    // Per-MB transform_size_8x8_flag — ITU-T H.264 §7.3.5.
-    // Used by deblocking (§8.7.2): MBs using 8x8 transform skip filtering of
+    // Per-MB transform_size_8x8_flag â€” ITU-T H.264 Â§7.3.5.
+    // Used by deblocking (Â§8.7.2): MBs using 8x8 transform skip filtering of
     // internal 4x4 edges (vertical edges 1,3 and horizontal edges 1,3).
     std::vector<uint8_t> mbTransform8x8_; // [mbIdx], 0 or 1
 
     // Per-frame MV context for inter prediction
     std::vector<MbMotionInfo> mbMotion_;  // [mbIdx]
 
-    /// Per-slice resolved scaling lists in raster order (§7.4.2.1.1).
+    /// Per-slice resolved scaling lists in raster order (Â§7.4.2.1.1).
     /// Refreshed each slice; lists default to flat-16 when no SPS/PPS matrix.
     ResolvedScalingLists scalingLists_{};
 
     // Per-MB intra 4x4 prediction modes for MPM derivation across MBs.
-    // [mbIdx * 16 + blkIdx] — only valid for I_4x4 MBs.
-    // For I_16x16 MBs, all entries set to DC(2) per spec §8.3.1.1.
+    // [mbIdx * 16 + blkIdx] â€” only valid for I_4x4 MBs.
+    // For I_16x16 MBs, all entries set to DC(2) per spec Â§8.3.1.1.
     std::vector<uint8_t> mbIntra4x4Modes_;  // [mbIdx * 16 + blkIdx]
 
     // CABAC state
@@ -221,20 +245,20 @@ private:
     CabacContextSet cabacCtx_;
     CabacNeighborCtx cabacNeighbor_; ///< Per-MB CABAC neighbor state (skip, I4x4, CBP, chroma mode)
     CabacMbParser cabacParser_;      ///< Bound syntax element parser for isolated testing
-    /// §9.3.3.1.1.5: prevMbQpDelta — tracks whether the previous MB had non-zero
+    /// Â§9.3.3.1.1.5: prevMbQpDelta â€” tracks whether the previous MB had non-zero
     /// mb_qp_delta for bin[0] context selection. Reset at slice start.
     bool prevMbHadNonZeroQpDelta_ = false;
 
     uint16_t widthInMbs_ = 0U;
     uint16_t heightInMbs_ = 0U;
-    uint16_t prevRefFrameNum_ = 0U; ///< §8.2.5.2: PrevRefFrameNum for gap detection
+    uint16_t prevRefFrameNum_ = 0U; ///< Â§8.2.5.2: PrevRefFrameNum for gap detection
 
     /** Get nC (CAVLC context) for a luma 4x4 block.
      *  nC = (leftNnz + topNnz + 1) >> 1
      */
     /** Get nC context for CAVLC coeff_token decode.
      *  nC = (nA + nB + 1) >> 1 when both available, else nA or nB alone.
-     *  Reference: ITU-T H.264 §9.2.1 Table 9-5 context derivation.
+     *  Reference: ITU-T H.264 Â§9.2.1 Table 9-5 context derivation.
      */
     int32_t getLumaNc(uint32_t mbX, uint32_t mbY, uint32_t blkIdx) const noexcept
     {
@@ -299,7 +323,7 @@ private:
      *  @param isCb       True for Cb plane, false for Cr
      *  @return nC context value
      *
-     *  Reference: ITU-T H.264 §9.2.1
+     *  Reference: ITU-T H.264 Â§9.2.1
      */
     int32_t getChromaNc(uint32_t mbX, uint32_t mbY, uint32_t blkIdx, bool isCb) const noexcept
     {
@@ -345,9 +369,9 @@ private:
     }
 
     /** Derive chroma QP from luma QP and PPS offset.
-     *  §8.5.12.1 / §7.4.2.2: QPc = cChromaQpTable[Clip3(0,51, QP + offset)].
-     *  NOTE (FM-10): Always use this helper — never apply luma QP directly to chroma.
-     *  [CHECKED §7.4.2.2] — clampQpIdx implements Clip3(0,51,·) and cChromaQpTable
+     *  Â§8.5.12.1 / Â§7.4.2.2: QPc = cChromaQpTable[Clip3(0,51, QP + offset)].
+     *  NOTE (FM-10): Always use this helper â€” never apply luma QP directly to chroma.
+     *  [CHECKED Â§7.4.2.2] â€” clampQpIdx implements Clip3(0,51,Â·) and cChromaQpTable
      *  matches spec Table 8-15.
      */
     static int32_t computeChromaQp(int32_t qp, int32_t offset) noexcept
@@ -355,7 +379,7 @@ private:
         return cChromaQpTable[clampQpIdx(qp + offset)];
     }
 
-    /** Decode transform_size_8x8_flag via CABAC — §9.3.3.1.1.10.
+    /** Decode transform_size_8x8_flag via CABAC â€” Â§9.3.3.1.1.10.
      *  ctxInc = condTermFlagA + condTermFlagB from neighbor transform flags.
      *  Stores the decoded flag in cabacNeighbor_ for future context derivation.
      *  Used by both I_NxN and P-inter decode paths. */
@@ -370,7 +394,7 @@ private:
     }
 
     /** Dequantize four chroma 2x2 DC coefficients after inverse Hadamard.
-     *  §8.5.11.2: uses LevelScale4x4(chromaQP%6, 0, 0) which includes
+     *  Â§8.5.11.2: uses LevelScale4x4(chromaQP%6, 0, 0) which includes
      *  `weightScale[0][0]` of the active chroma scaling list when non-flat.
      *  `weightScale00` passes that factor; flat lists use 16 (the identity).
      *  [CHECKED FM-10]
@@ -381,7 +405,7 @@ private:
         int32_t cqpDiv6 = chromaQp / 6;
         int32_t cqpMod6 = chromaQp % 6;
         int32_t normAdjust = cDequantScale[cqpMod6][0]; // normAdjust4x4(chromaQP%6, 0, 0)
-        // Spec §8.5.11.2 Eq 8-326 for chroma DC after 2x2 Hadamard:
+        // Spec Â§8.5.11.2 Eq 8-326 for chroma DC after 2x2 Hadamard:
         //   dcC' = (dcC * LevelScale4x4(cQP%6,0,0)) << (cQP/6 - 5)        if cQP/6 >= 5
         //   dcC' = (dcC * LevelScale4x4(cQP%6,0,0) + 2^(4-cQP/6)) >> (5-cQP/6) otherwise
         // For flat (weightScale00=16) the libavc path keeps the `/16`
@@ -413,12 +437,12 @@ private:
         }
     }
 
-    /** Chroma AC coded_block_flag context increment — §9.3.3.1.1.9 (ctxBlockCat=4).
+    /** Chroma AC coded_block_flag context increment â€” Â§9.3.3.1.1.9 (ctxBlockCat=4).
      *
      *  Chroma 4x4 blocks in 2x2 grid: 0=TL, 1=TR, 2=BL, 3=BR.
-     *  Left/top neighbor derivation follows §6.4.11.5 for neighboring 4x4 chroma blocks.
+     *  Left/top neighbor derivation follows Â§6.4.11.5 for neighboring 4x4 chroma blocks.
      *  transBlockN available if neighbor avail, not skip/I_PCM, cbpChroma==2.
-     *  condTermFlagN: unavail+intra→1, unavail+inter→0, avail+transBlock avail→actual CBF.
+     *  condTermFlagN: unavail+intraâ†’1, unavail+interâ†’0, avail+transBlock availâ†’actual CBF.
      *
      *  @param isCb  True for Cb component, false for Cr
      *  @param isCurrentIntra  True if current MB is intra
@@ -441,7 +465,7 @@ private:
             if (cabacNeighbor_[leftMbIdx].chromaCbp() == 2U)
                 leftNnz = nnz[leftMbIdx * 4U + blkIdx + 1U];
             else
-                leftNnz = 0U; // cbpChroma < 2 → transBlock not available → 0
+                leftNnz = 0U; // cbpChroma < 2 â†’ transBlock not available â†’ 0
         }
 
         // Top neighbor (B)
@@ -454,14 +478,14 @@ private:
             if (cabacNeighbor_[topMbIdx].chromaCbp() == 2U)
                 topNnz = nnz[topMbIdx * 4U + blkIdx + 2U];
             else
-                topNnz = 0U; // cbpChroma < 2 → transBlock not available → 0
+                topNnz = 0U; // cbpChroma < 2 â†’ transBlock not available â†’ 0
         }
 
         return (leftNnz != 0U ? 1U : 0U) + (topNnz != 0U ? 2U : 0U);
     }
 
     /** Dequantize 16 Intra_16x16 luma DC coefficients after inverse 4x4 Hadamard.
-     *  §8.5.12.1 Eq. 8-324..8-326: Scaling of Intra16x16 luma DC coefficients.
+     *  Â§8.5.12.1 Eq. 8-324..8-326: Scaling of Intra16x16 luma DC coefficients.
      *    if qp/6 >= 2: dc[i] = dc[i] * LevelScale(qp%6,0,0) << (qp/6 - 2)
      *    else:         dc[i] = (dc[i] * LevelScale(qp%6,0,0) + 2^(1-qp/6)) >> (2 - qp/6)
      *  NOTE: Uses luma QP (not chroma QP).
@@ -472,7 +496,7 @@ private:
         int32_t qpDiv6 = qp / 6;
         int32_t qpMod6 = qp % 6;
         int32_t normAdjust = cDequantScale[qpMod6][0]; // normAdjust4x4(qP%6, 0, 0)
-        // Spec §8.5.10 Eq 8-325 for I_16x16 DC after Hadamard:
+        // Spec Â§8.5.10 Eq 8-325 for I_16x16 DC after Hadamard:
         //   dcY' = (dcY * LevelScale4x4(qP%6,0,0)) << (qP/6 - 6)           if qP/6 >= 6
         //   dcY' = (dcY * LevelScale4x4(qP%6,0,0) + 2^(5-qP/6)) >> (6-qP/6) if qP/6 < 6
         // LevelScale4x4(m,0,0) = normAdjust * weightScale00.
@@ -481,7 +505,7 @@ private:
         // the factor of 16 into a pre-subtracted shift exponent, producing
         // the `(qpDiv6 - 2)` / `(2 - qpDiv6)` form. That fast path has no
         // precision loss. For non-flat, we fall back to the spec equation
-        // directly — multiplying by weightScale00 and shifting by -6 — so
+        // directly â€” multiplying by weightScale00 and shifting by -6 â€” so
         // the `/16` rounding of the earlier approach is avoided.
         const bool flat = (weightScale00 == 16);
         for (uint32_t i = 0U; i < 16U; ++i)
@@ -510,10 +534,10 @@ private:
     }
 
     /** Sample reference pixels for one I_4x4 4x4 block from activeFrame_.
-     *  §8.3.1.1: Reference sample availability.
+     *  Â§8.3.1.1: Reference sample availability.
      *  Uses stride arithmetic for left column.
      *  Always uses activeFrame_ (FM-16: avoids currentFrame_ vs activeFrame_ mismatch).
-     *  [UNCHECKED §8.3.1.1]
+     *  [UNCHECKED Â§8.3.1.1]
      *
      *  @param absX/absY  Absolute pixel position of block top-left
      *  @param blkIdx     Scan-order block index within MB (0..15)
@@ -536,8 +560,8 @@ private:
             const uint8_t* row = activeFrame_->yRow(absY - 1U);
             for (uint32_t i = 0U; i < 4U; ++i) topBuf[i] = row[absX + i];
             top = topBuf;
-            // Top-right availability — §6.4.11. [CHECKED §6.4.11]
-            // cTopRightUnavailScan derived at compile time from §6.4.3 scan
+            // Top-right availability â€” Â§6.4.11. [CHECKED Â§6.4.11]
+            // cTopRightUnavailScan derived at compile time from Â§6.4.3 scan
             // order (see tables.hpp). Covers: same-MB scan ordering + right-
             // edge. Caller checks absX+4 for frame boundary.
             bool topRightAvail = (absX + 4U < activeFrame_->width())
@@ -566,6 +590,12 @@ private:
     /** Decode a slice (IDR or non-IDR). */
     DecodeStatus decodeSlice(BitReader& br, const NalUnit& nal) noexcept
     {
+        allocationFailure_ = {};
+        diagStage_ = 1U;
+        diagMbEntered_ = UINT32_MAX;
+        diagMbCompleted_ = UINT32_MAX;
+        diagBitOffset_ = 0U;
+
         bool isIdr = (nal.type == NalType::SliceIdr);
 
         // Peek at PPS ID to find the right parameter sets
@@ -579,7 +609,7 @@ private:
         const Sps* sps = paramSets_.getSps(pps->spsId_);
         if (!sps) return DecodeStatus::Error;
 
-        // §7.4.2.1.1 / §8.5.12.1 — resolve scaling lists for this slice.
+        // Â§7.4.2.1.1 / Â§8.5.12.1 â€” resolve scaling lists for this slice.
         // Cached per-slice; dequant call sites take the scaled path only when
         // the relevant list is non-flat (most streams remain on the flat-16
         // fast path). See scaling_list.hpp for fall-back rules.
@@ -590,6 +620,9 @@ private:
         if (parseSliceHeader(br, *sps, *pps, isIdr, nal.refIdc, sh) != Result::Ok)
             return DecodeStatus::Error;
 
+        diagStage_ = 2U;
+        diagBitOffset_ = static_cast<uint32_t>(br.bitOffset());
+
         // Initialize DPB and allocate context on first SPS use
         widthInMbs_ = sps->widthInMbs_;
         heightInMbs_ = sps->heightInMbs_;
@@ -598,22 +631,82 @@ private:
         //TODO: We should reason about the best way to manage DPB initialization and resizing. Currently we check if dpbInitialized_ is false, and if so we call dpb_.init() with the width, height, and numRefFrames from the SPS. This means that the DPB will be initialized on the first frame that uses a valid SPS. However, we should also consider what happens if we encounter a new SPS with different dimensions or reference frame requirements later in the stream. In that case, we might need to reinitialize or resize the DPB to accommodate the new parameters. We should ensure that our DPB implementation can handle such changes gracefully, either by allowing dynamic resizing or by enforcing that all frames use the same SPS parameters. Additionally, we should consider how this interacts with frame buffers that are currently in use as references in the DPB when reinitializing or resizing.
         if (!dpbInitialized_)
         {
-            dpb_.init(sps->width(), sps->height(), sps->numRefFrames_);
+            if (!dpb_.init(sps->width(), sps->height(), sps->numRefFrames_))
+            {
+                allocationFailure_ = dpb_.allocationFailure();
+                return DecodeStatus::Error;
+            }
             dpbInitialized_ = true;
         }
 
-        // Get a frame buffer from the DPB to decode into
-        Frame* decodeTarget = dpb_.getDecodeTarget();
+        // IDR resets all previous DPB state before selecting the decode target.
+        if (isIdr)
+        {
+            dpb_.flush();
+            prevRefFrameNum_ = sh.frameNum_; // §8.2.5.2: reset at IDR
+        }
+
+        // Get exactly one frame buffer for this picture.
+        uint32_t maxFrameNumForDpb = 1U << sps->bitsInFrameNum_;
+        Frame* decodeTarget = dpb_.getDecodeTarget(sh.frameNum_, maxFrameNumForDpb);
         if (!decodeTarget)
+        {
+            allocationFailure_ = dpb_.allocationFailure();
             return DecodeStatus::Error;
+        }
 
         //TODO: We should reason about the best way to manage the active frame buffer for decoding. Currently we call dpb_.getDecodeTarget() to get a frame to decode into, and we also have a separate currentFrame_ that we use for backwards compatibility. We need to ensure that we are correctly managing the lifecycle of these frames, especially when it comes to reference counting and ensuring that we don't overwrite frames that are still needed as references. We might want to consider having a clear ownership model where the DPB manages all frame buffers and we only have pointers or references to those frames in the decoder, rather than having a separate currentFrame_ that is allocated independently. This would help avoid confusion and potential bugs related to frame management.
-        // Also keep a reference in currentFrame_ for backwards compatibility
+        // Also keep a reference in currentFrame_ for backwards compatibility.
+        // Memory-constrained integrations can rely exclusively on the DPB frame.
+#ifndef SUB0H264_DISABLE_LEGACY_CURRENT_FRAME
         if (!currentFrame_.isAllocated() ||
             currentFrame_.width() != sps->width() ||
             currentFrame_.height() != sps->height())
         {
             currentFrame_.allocate(sps->width(), sps->height());
+        }
+#endif
+
+        // Reserve every context-array growth as one batch before std::vector
+        // mutates decoder state. Embedded integrations can reject the batch
+        // cleanly when the firmware heap cannot hold all of it concurrently.
+        AllocationRequest contextRequests[7];
+        size_t contextRequestCount = 0U;
+        const size_t lumaCount = static_cast<size_t>(totalMbs) * 16U;
+        const size_t chromaCount = static_cast<size_t>(totalMbs) * 4U;
+        const size_t motionCount = static_cast<size_t>(totalMbs) * 16U;
+
+        if (nnzLuma_.capacity() < lumaCount)
+            contextRequests[contextRequestCount++] =
+                { AllocationTag::NnzLuma, lumaCount * sizeof(uint8_t) };
+        if (nnzCb_.capacity() < chromaCount)
+            contextRequests[contextRequestCount++] =
+                { AllocationTag::NnzCb, chromaCount * sizeof(uint8_t) };
+        if (nnzCr_.capacity() < chromaCount)
+            contextRequests[contextRequestCount++] =
+                { AllocationTag::NnzCr, chromaCount * sizeof(uint8_t) };
+        if (mbQps_.capacity() < totalMbs)
+            contextRequests[contextRequestCount++] =
+                { AllocationTag::MbQps,
+                  static_cast<size_t>(totalMbs) * sizeof(int32_t) };
+        if (mbTransform8x8_.capacity() < totalMbs)
+            contextRequests[contextRequestCount++] =
+                { AllocationTag::MbTransform8x8,
+                  static_cast<size_t>(totalMbs) * sizeof(uint8_t) };
+        if (mbMotion_.capacity() < motionCount)
+            contextRequests[contextRequestCount++] =
+                { AllocationTag::MbMotion,
+                  motionCount * sizeof(MbMotionInfo) };
+        if (mbIntra4x4Modes_.capacity() < lumaCount)
+            contextRequests[contextRequestCount++] =
+                { AllocationTag::MbIntra4x4Modes,
+                  lumaCount * sizeof(uint8_t) };
+
+        if (contextRequestCount != 0U) {
+            allocationFailure_ = {};
+            if (!allocationPreflight(
+                    contextRequests, contextRequestCount, &allocationFailure_))
+                return DecodeStatus::Error;
         }
 
         // Resize context arrays
@@ -627,15 +720,6 @@ private:
         mbTransform8x8_.resize(totalMbs, 0U);
         mbMotion_.resize(totalMbs * 16U); // 16 MVs per MB (per-4x4-block)
         mbIntra4x4Modes_.resize(totalMbs * 16U, 2U); // Default DC(2)
-
-        // Clear context for new frame
-        if (isIdr)
-        {
-            dpb_.flush();
-            prevRefFrameNum_ = sh.frameNum_; // §8.2.5.2: reset at IDR
-            // Re-get decode target after flush
-            decodeTarget = dpb_.getDecodeTarget();
-        }
 
         // TODO; We should reason over if these all need to be zeroed - document if they do or don't etc.
         //TODO: We should consider using a more efficient way to clear these large context arrays, such as std::fill or memset, instead of a loop. For example, we could use std::fill(nnzLuma_.begin(), nnzLuma_.end(), 0U) to set all values to zero in one call, which is likely optimized and more efficient than a manual loop. This would also improve readability by clearly indicating that we are initializing the entire array to zero.
@@ -657,7 +741,7 @@ private:
         // Compute effective QP
         int32_t sliceQp = pps->picInitQp_ + sh.sliceQpDelta_;
 
-        // Emit SliceStart trace event (always — cheap callback check).
+        // Emit SliceStart trace event (always â€” cheap callback check).
         // The callback decides whether to enable entropy tracing for this slice.
         trace_.onSliceStart(cabacSliceCount_,
             static_cast<uint32_t>(sh.sliceType_),
@@ -675,12 +759,12 @@ private:
             //TODO: We should reason about the best way to handle bitstream alignment after the slice header when using CABAC. Currently we call br.alignToByte() before initializing the CABAC engine, which is necessary because the slice header may not end on a byte boundary and CABAC decoding operates on bytes. However, we should ensure that this alignment is correctly handled in all cases, especially if there are any optional fields in the slice header that could affect the bit offset. We might also want to consider encapsulating this alignment logic into a helper function that is called whenever we switch from parsing syntax elements to initializing the CABAC engine, to ensure consistency and reduce the chance of errors.
             br.alignToByte();
 
-            // Initialize CABAC contexts — §9.3.1.1
+            // Initialize CABAC contexts â€” Â§9.3.1.1
             uint32_t sliceTypeIdx = (sh.sliceType_ == SliceType::I) ? 2U :
                                     (sh.sliceType_ == SliceType::P) ? 0U : 1U;
             cabacCtx_.init(sliceTypeIdx, sh.cabacInitIdc_, sliceQp);
 
-            // Initialize arithmetic engine — §9.3.1.2
+            // Initialize arithmetic engine â€” Â§9.3.1.2
             cabacEngine_.init(br);
             // Emit CabacInit trace event and bind trace to the engine.
             // The callback decides whether to act on this slice's bins.
@@ -692,7 +776,10 @@ private:
             ++cabacSliceCount_;
 
             // Initialize per-MB CABAC neighbor context
-            cabacNeighbor_.init(widthInMbs_, heightInMbs_);
+            if (!cabacNeighbor_.init(widthInMbs_, heightInMbs_)) {
+                allocationFailure_ = cabacNeighbor_.allocationFailure();
+                return DecodeStatus::Error;
+            }
 
             // Bind the syntax element parser to engine + contexts + neighbors
             cabacParser_.bind(cabacEngine_, cabacCtx_, cabacNeighbor_);
@@ -710,9 +797,9 @@ private:
         // Decode macroblocks
         if (sh.sliceType_ == SliceType::I)
         {
-            // QPY accumulates across MBs — ITU-T H.264 §7.4.5.
+            // QPY accumulates across MBs â€” ITU-T H.264 Â§7.4.5.
             int32_t mbQp = sliceQp;
-            // §9.3.3.1.1.5: prevMbQpDelta resets to 0 at slice start. [CHECKED §9.3.3.1.1.5]
+            // Â§9.3.3.1.1.5: prevMbQpDelta resets to 0 at slice start. [CHECKED Â§9.3.3.1.1.5]
             prevMbHadNonZeroQpDelta_ = false;
             for (uint32_t mbAddr = sh.firstMbInSlice_; mbAddr < totalMbs; ++mbAddr)
             {
@@ -721,10 +808,10 @@ private:
 
                 if (useCabac)
                 {
-                    // Note: do NOT gate on br.isExhausted() — CABAC's 16-bit
+                    // Note: do NOT gate on br.isExhausted() â€” CABAC's 16-bit
                     // lookahead means the engine still holds valid bins after
                     // the underlying BitReader appears exhausted. Termination
-                    // is via end_of_slice_flag (§7.3.4) below.
+                    // is via end_of_slice_flag (Â§7.3.4) below.
 #ifdef SUB0H264_TRACE_I4X4_BLOCKS
                     std::fprintf(stderr, "MB_START(%u,%u): R=%u O=%u bp=%u qp=%d\n",
                         mbX, mbY, cabacEngine_.range(), cabacEngine_.offset(),
@@ -737,7 +824,7 @@ private:
                         break;
                     if (profile_) profile_->intraPredUs += sub0h264TimerUs() - cT0;
 
-                    // §7.3.4: decode end_of_slice_flag after each MB
+                    // Â§7.3.4: decode end_of_slice_flag after each MB
                     if (mbAddr < totalMbs - 1U)
                     {
                         if (cabacEngine_.decodeTerminate() == 1U)
@@ -747,19 +834,29 @@ private:
                 else
                 {
                     int64_t intraT0 = profile_ ? sub0h264TimerUs() : 0;
+
+                    diagStage_ = 3U;
+                    diagMbEntered_ = mbAddr;
+                    diagBitOffset_ = static_cast<uint32_t>(br.bitOffset());
+
                     if (!decodeIntraMb(br, *sps, *pps, sh, mbQp, mbX, mbY))
                         break;
+
+                    diagMbCompleted_ = mbAddr;
+                    diagBitOffset_ = static_cast<uint32_t>(br.bitOffset());
+                    diagStage_ = 4U;
+
                     if (profile_) profile_->intraPredUs += sub0h264TimerUs() - intraT0;
                 }
                 // Trace per-MB bit offset for alignment debugging (type 201)
                 trace_.onMbStart(mbX, mbY, 201U, static_cast<uint32_t>(br.bitOffset()));
-                // Store accumulated QP for deblocking pass — ITU-T H.264 §8.7.2.2.
+                // Store accumulated QP for deblocking pass â€” ITU-T H.264 Â§8.7.2.2.
                 mbQps_[mbAddr] = mbQp;
             }
         }
         else if (sh.sliceType_ == SliceType::P)
         {
-            // Build L0 reference list per §8.2.4.2.1, apply reordering per §8.2.4.3.
+            // Build L0 reference list per Â§8.2.4.2.1, apply reordering per Â§8.2.4.3.
             uint32_t maxFrameNum = 1U << sps->bitsInFrameNum_;
             dpb_.buildRefListL0(sh.frameNum_, maxFrameNum,
                                 sh.numReorderCmdsL0_,
@@ -767,15 +864,15 @@ private:
 
             // Get reference frame AFTER building L0 list (avoids stale reference)
 #if SUB0H264_TRACE
-            // (L0 list built — per-partition ref lookup via getRef() in doPartitionMC)
+            // (L0 list built â€” per-partition ref lookup via getRef() in doPartitionMC)
 #endif
             refFrame = dpb_.getReference(0U);
             if (!refFrame)
                 return DecodeStatus::Error;
 
-            // QPY accumulates across MBs — ITU-T H.264 §7.4.5.
+            // QPY accumulates across MBs â€” ITU-T H.264 Â§7.4.5.
             int32_t mbQp = sliceQp;
-            prevMbHadNonZeroQpDelta_ = false; // §9.3.3.1.1.5: reset at slice start
+            prevMbHadNonZeroQpDelta_ = false; // Â§9.3.3.1.1.5: reset at slice start
 
             if (useCabac)
             {
@@ -789,15 +886,15 @@ private:
                     // current bitOffset, so isExhausted() returns true while the
                     // engine still holds valid bins. Don't gate the loop on it;
                     // the end_of_slice_flag (decoded after each MB) is the proper
-                    // termination per §7.3.4. Removing this fixed P-frame decode
-                    // truncating ~3 MBs early on Tapo C110 (last MB(36,22) → MB(39,22)).
+                    // termination per Â§7.3.4. Removing this fixed P-frame decode
+                    // truncating ~3 MBs early on Tapo C110 (last MB(36,22) â†’ MB(39,22)).
 
                     // Emit CABAC MB-start trace (a=200, b=bitPosition).
                     // Allows tests to verify the CABAC bit-position at the start of each MB.
                     trace_.onMbStart(mbX, mbY, 200U,
                                      static_cast<uint32_t>(cabacEngine_.bitPosition()));
 
-                    // Decode mb_skip_flag — §9.3.3.1.1.1
+                    // Decode mb_skip_flag â€” Â§9.3.3.1.1.1
                     bool leftSkip, topSkip;
                     cabacNeighbor_.skipCtx(mbX, mbY, leftSkip, topSkip);
                     uint32_t skipFlag = cabacDecodeMbSkipP(cabacEngine_, cabacCtx_.data(),
@@ -808,24 +905,24 @@ private:
                         cabacNeighbor_[mbAddr].setSkip(true);
                         cabacNeighbor_[mbAddr].setI4x4(false);
                         cabacNeighbor_[mbAddr].setTransform8x8(false);
-                        // Skip MBs have no residual → CBP = 0, no DC CBF.
+                        // Skip MBs have no residual â†’ CBP = 0, no DC CBF.
                         // Must set explicitly so neighbor CBP context derivation
-                        // (§9.3.3.1.1.4) sees the skip MB as "not coded".
+                        // (Â§9.3.3.1.1.4) sees the skip MB as "not coded".
                         cabacNeighbor_[mbAddr].cbp = 0U;
                         cabacNeighbor_[mbAddr].dcCbf = 0U;
-                        // §9.3.3.1.1.5 / JM cabac.c L604: skip MBs reset
+                        // Â§9.3.3.1.1.5 / JM cabac.c L604: skip MBs reset
                         // prevHadDelta to false (mb_qp_delta is absent).
                         prevMbHadNonZeroQpDelta_ = false;
                         int64_t skipT0 = profile_ ? sub0h264TimerUs() : 0;
                         decodePSkipMb(*decodeTarget, *refFrame, mbX, mbY, sh);
                         if (profile_) profile_->interPredUs += sub0h264TimerUs() - skipT0;
-                        // Skip MBs inherit QP — no mb_qp_delta per §7.4.5.
+                        // Skip MBs inherit QP â€” no mb_qp_delta per Â§7.4.5.
                     }
                     else
                     {
                         cabacNeighbor_[mbAddr].setSkip(false);
 
-                        // §9.3.3.1.2: condTermFlagN = 0 for unavailable OR I_NxN
+                        // Â§9.3.3.1.2: condTermFlagN = 0 for unavailable OR I_NxN
                         bool leftCondZero, topCondZero;
                         cabacNeighbor_.mbTypeCtxI(mbX, mbY, leftCondZero, topCondZero);
                         uint32_t mbTypeRaw = cabacDecodeMbTypeP(cabacEngine_, cabacCtx_.data(),
@@ -843,14 +940,14 @@ private:
                                 ok = decodeCabacI4x4Mb(*sps, *pps, mbQp, mbX, mbY);
                             else if (intraMbType == 25U)
                             {
-                                // I_PCM (§9.3.3.1.1): raw 256 Y + 64 Cb + 64 Cr
+                                // I_PCM (Â§9.3.3.1.1): raw 256 Y + 64 Cb + 64 Cr
                                 // bytes follow the mb_type, byte-aligned. NOT
-                                // YET IMPLEMENTED — decode produces undefined
+                                // YET IMPLEMENTED â€” decode produces undefined
                                 // pixels for I_PCM macroblocks. Stream decode
                                 // cannot continue correctly because subsequent
                                 // bits are misaligned.
                                 SUB0H264_UNSUPPORTED(
-                                    "CABAC I_PCM (§9.3.3.1.1) not implemented — "
+                                    "CABAC I_PCM (Â§9.3.3.1.1) not implemented â€” "
                                     "subsequent bitstream is misaligned; decoder "
                                     "cannot continue safely.");
                                 ok = false;
@@ -870,14 +967,14 @@ private:
                         }
                     }
 
-                    // §7.3.4: decode end_of_slice_flag after each MB
+                    // Â§7.3.4: decode end_of_slice_flag after each MB
                     if (mbAddr < totalMbs - 1U)
                     {
                         if (cabacEngine_.decodeTerminate() == 1U)
                             break;
                     }
 
-                    // Store accumulated QP for deblocking pass — §8.7.2.2.
+                    // Store accumulated QP for deblocking pass â€” Â§8.7.2.2.
                     mbQps_[mbAddr] = mbQp;
                 }
             }
@@ -909,7 +1006,7 @@ private:
                         decodePSkipMb(*decodeTarget, *refFrame, mbX, mbY, sh);
                         if (profile_) profile_->interPredUs += sub0h264TimerUs() - mcT0;
                         --mbSkipRun;
-                        // §7.3.4: after skip_run exhausted, next MB is coded
+                        // Â§7.3.4: after skip_run exhausted, next MB is coded
                         // (mb_type follows, NOT another skip_run).
                     }
                     else
@@ -937,7 +1034,7 @@ private:
                             if (profile_) profile_->interPredUs += sub0h264TimerUs() - interT0;
                         }
                     }
-                    // Store accumulated QP for deblocking pass — §8.7.2.2.
+                    // Store accumulated QP for deblocking pass â€” Â§8.7.2.2.
                     mbQps_[mbAddr] = mbQp;
                 }
             }
@@ -947,30 +1044,27 @@ private:
             // B-slices, SI/SP slices not implemented
             SUB0H264_UNSUPPORTED(
                 "Only I-slices and P-slices are implemented. "
-                "B-slices (§7.3.4), SI-slices, SP-slices are not supported.");
+                "B-slices (Â§7.3.4), SI-slices, SP-slices are not supported.");
             return DecodeStatus::Error;
         }
-
+        diagStage_ = 5U;
+        diagBitOffset_ = static_cast<uint32_t>(br.bitOffset());
 
         // Deblocking filter pass (entire frame, after all MBs decoded)
-        // Per-MB QP is used; boundary edges use (qpP + qpQ + 1) >> 1 per §8.7.2.2.
-        // §7.3.3: disable_deblocking_filter_idc == 2 means filter within slice
+        // Per-MB QP is used; boundary edges use (qpP + qpQ + 1) >> 1 per Â§8.7.2.2.
+        // Â§7.3.3: disable_deblocking_filter_idc == 2 means filter within slice
         // but NOT across slice boundaries. We don't implement cross-slice skip
         // (single-slice streams only). Gracefully error if idc==2 is encountered.
         if (sh.disableDeblockingFilter_ == 2U)
         {
             SUB0H264_UNSUPPORTED(
                 "disable_deblocking_filter_idc==2 (no cross-slice filtering) "
-                "not implemented — would require per-MB slice membership "
-                "tracking §8.7");
+                "not implemented â€” would require per-MB slice membership "
+                "tracking Â§8.7");
             return DecodeStatus::Error;
         }
-#ifndef SUB0H264_SKIP_DEBLOCK
-        if (pps->deblockingFilterControlPresent_ == 0U ||
-            sh.disableDeblockingFilter_ != 1U)
-#else
+        // TEMP seq63 diagnostic: bypass deblocking pass.
         if (false)
-#endif
         {
             int64_t dbT0 = profile_ ? sub0h264TimerUs() : 0;
             int32_t alphaOff = sh.sliceAlphaC0Offset_;
@@ -1008,7 +1102,7 @@ private:
         int64_t syncT0 = profile_ ? sub0h264TimerUs() : 0;
         if (activeFrame_ != decodeTarget && decodeTarget->isAllocated())
         {
-            // Fallback: activeFrame_ was currentFrame_ → copy to DPB
+            // Fallback: activeFrame_ was currentFrame_ â†’ copy to DPB
             std::memcpy(decodeTarget->yData(), activeFrame_->yData(),
                         activeFrame_->yStride() * activeFrame_->height());
             std::memcpy(decodeTarget->uData(), activeFrame_->uData(),
@@ -1020,13 +1114,15 @@ private:
         if (profile_) profile_->overheadUs += sub0h264TimerUs() - syncT0;
 
         //TODO: We should reason about when frames are marked as reference and when they are output. Currently we mark as reference here after decoding, but before output. This means that the current frame is available as a reference for the next frame before it is output. This is necessary for correct reference management, but we should consider if there are any implications for output latency or memory management, especially if we want to support low-latency streaming or real-time applications.
-        // Mark as reference for future P-frames — §8.2.5
+        diagStage_ = 6U;
+
+        // Mark as reference for future P-frames â€” Â§8.2.5
         if (nal.refIdc != 0U)
         {
             dpb_.markAsReference(sh.frameNum_);
             prevRefFrameNum_ = sh.frameNum_;
 
-            // Apply MMCO commands for non-IDR adaptive marking — §8.2.5.4
+            // Apply MMCO commands for non-IDR adaptive marking â€” Â§8.2.5.4
             if (!sh.isIdr_ && sh.decRefPicMarking_.adaptiveRefPicMarking_ &&
                 sh.decRefPicMarking_.numMmcoCommands_ > 0U)
             {
@@ -1036,15 +1132,15 @@ private:
                                sh.decRefPicMarking_.mmcoCommands_);
             }
         }
-
         ++frameCount_;
         if (profile_) ++profile_->frameCount;
+        diagStage_ = 7U;
         return DecodeStatus::FrameDecoded;
     }
 
     /** Decode one intra macroblock.
-     *  @param currentQp  [in/out] Accumulated QP — updated by mb_qp_delta.
-     *                    ITU-T H.264 §7.4.5: QPY is accumulated across MBs.
+     *  @param currentQp  [in/out] Accumulated QP â€” updated by mb_qp_delta.
+     *                    ITU-T H.264 Â§7.4.5: QPY is accumulated across MBs.
      */
     bool decodeIntraMb(BitReader& br, const Sps& sps, const Pps& pps,
                        const SliceHeader& sh, int32_t& currentQp,
@@ -1079,12 +1175,12 @@ private:
 
         if (mbTypeRaw == 25U)
         {
-            // CAVLC I_PCM (§7.3.5 / §7.3.5.3): raw 256 Y + 64 Cb + 64 Cr
+            // CAVLC I_PCM (Â§7.3.5 / Â§7.3.5.3): raw 256 Y + 64 Cb + 64 Cr
             // bytes follow mb_type after pcm_alignment_zero_bit padding to
-            // byte boundary. NOT IMPLEMENTED — subsequent bits misaligned
+            // byte boundary. NOT IMPLEMENTED â€” subsequent bits misaligned
             // and decoder cannot continue safely.
             SUB0H264_UNSUPPORTED(
-                "CAVLC I_PCM (§7.3.5) not implemented — subsequent "
+                "CAVLC I_PCM (Â§7.3.5) not implemented â€” subsequent "
                 "bitstream is misaligned; decoder cannot continue safely.");
             return false;
         }
@@ -1104,7 +1200,7 @@ private:
     /** Dequantize a 4x4 block using the slice's resolved scaling list for
      *  the given plane/intra-vs-inter selector. Falls through to the flat-16
      *  fast path when the active list is flat (no per-coefficient multiply).
-     *  See §8.5.12.1 / §7.4.2.1.1.
+     *  See Â§8.5.12.1 / Â§7.4.2.1.1.
      */
     void dequantize4x4(int16_t* coeffs, int32_t qp, Block4x4Plane plane) noexcept
     {
@@ -1135,8 +1231,8 @@ private:
         uint8_t cbpLuma  = i16x16CbpLuma(static_cast<uint8_t>(mbTypeRaw));
         uint8_t cbpChroma = i16x16CbpChroma(static_cast<uint8_t>(mbTypeRaw));
 
-        // Zero NNZ for this MB — blocks not coded retain 0 for correct
-        // neighbor context in adjacent MBs' CAVLC decode (§9.2.1).
+        // Zero NNZ for this MB â€” blocks not coded retain 0 for correct
+        // neighbor context in adjacent MBs' CAVLC decode (Â§9.2.1).
         {
             uint32_t mbIdx = mbY * widthInMbs_ + mbX;
             std::fill_n(&nnzLuma_[mbIdx * 16U], 16U, static_cast<uint8_t>(0U));
@@ -1144,14 +1240,14 @@ private:
             std::fill_n(&nnzCr_[mbIdx * 4U], 4U, static_cast<uint8_t>(0U));
         }
 
-        // §7.3.5 macroblock_layer() sequencing for I_16x16: [CHECKED §7.3.5]
-        //   Step 1 — mb_type: decoded in caller (encodes predMode, cbpLuma, cbpChroma).
-        //   Step 2 — mb_pred: intra_chroma_pred_mode ue(v) below [CHECKED §7.3.5.1]
-        //             NOTE (FM-3): coded_block_pattern is ABSENT for I_16x16 —
+        // Â§7.3.5 macroblock_layer() sequencing for I_16x16: [CHECKED Â§7.3.5]
+        //   Step 1 â€” mb_type: decoded in caller (encodes predMode, cbpLuma, cbpChroma).
+        //   Step 2 â€” mb_pred: intra_chroma_pred_mode ue(v) below [CHECKED Â§7.3.5.1]
+        //             NOTE (FM-3): coded_block_pattern is ABSENT for I_16x16 â€”
         //             it is embedded in mb_type via i16x16CbpLuma/i16x16CbpChroma.
-        //   Step 3 — mb_qp_delta: ALWAYS present for I_16x16 (below). [CHECKED §7.3.5]
-        //   Step 4 — residual: DC + AC luma, then DC + AC chroma. [CHECKED §7.3.5.3]
-        // §7.3.5.1 mb_pred for Intra_16x16: intra_chroma_pred_mode ue(v).
+        //   Step 3 â€” mb_qp_delta: ALWAYS present for I_16x16 (below). [CHECKED Â§7.3.5]
+        //   Step 4 â€” residual: DC + AC luma, then DC + AC chroma. [CHECKED Â§7.3.5.3]
+        // Â§7.3.5.1 mb_pred for Intra_16x16: intra_chroma_pred_mode ue(v).
 #if SUB0H264_TRACE
         if (mbY == 0U && (mbX == 0U || mbX == 7U || mbX == 8U))
             std::printf("[DBG]   MB(%lu) Before chroma_pred: bitOff=%lu\n",
@@ -1165,7 +1261,7 @@ private:
                 (unsigned long)mbX, (unsigned long)chromaPredMode, (unsigned long)br.bitOffset());
 #endif
 
-        // §7.3.5: mb_qp_delta always present for Intra_16x16. [CHECKED §7.3.5]
+        // Â§7.3.5: mb_qp_delta always present for Intra_16x16. [CHECKED Â§7.3.5]
         int32_t qpDelta = br.readSev();
 #if SUB0H264_TRACE
         if (mbY == 0U && (mbX == 0U || mbX == 7U || mbX == 8U))
@@ -1221,7 +1317,7 @@ private:
         // Inverse Hadamard
         inverseHadamard4x4(dcCoeffs);
 
-        // §8.5.12.1: Intra16x16 luma DC dequant after Hadamard. Scaling list
+        // Â§8.5.12.1: Intra16x16 luma DC dequant after Hadamard. Scaling list
         // weightScale[0][0] applied via the dequant helper's second arg.
         dequantLumaDcValues(dcCoeffs, qp, scalingLists_.list4x4[0][0]);
 
@@ -1240,7 +1336,7 @@ private:
 
         for (uint32_t blkIdx = 0U; blkIdx < 16U; ++blkIdx)
         {
-            // H.264 §6.4.3: blocks iterate in spec scan order, not raster.
+            // H.264 Â§6.4.3: blocks iterate in spec scan order, not raster.
             uint32_t blkX = cLuma4x4BlkX[blkIdx];
             uint32_t blkY = cLuma4x4BlkY[blkIdx];
             uint32_t rasterIdx = cLuma4x4ToRaster[blkIdx];
@@ -1265,9 +1361,9 @@ private:
                 nnzLuma_[mbIdx * 16U + rasterIdx] = acBlock.totalCoeff;
             }
 
-            // Inverse quantize AC coefficients only — DC was already dequantized
+            // Inverse quantize AC coefficients only â€” DC was already dequantized
             // in the Hadamard path above. Dequanting position 0 again would
-            // double-scale the DC coefficient (ITU-T H.264 §8.5.12.1).
+            // double-scale the DC coefficient (ITU-T H.264 Â§8.5.12.1).
             if (cbpLuma)
             {
                 // Save DC, dequant all, restore DC (avoids conditional per-coeff)
@@ -1282,7 +1378,7 @@ private:
             inverseDct4x4AddPred(coeffs, predPtr, 16U, outPtr, yStride);
         }
 
-        // 4. Decode chroma (simplified — DC prediction + optional residual)
+        // 4. Decode chroma (simplified â€” DC prediction + optional residual)
         decodeChromaMb(br, pps, chromaPredMode, cbpChroma, qp, mbX, mbY);
 
         return true;
@@ -1300,13 +1396,13 @@ private:
      *    8  9  10 11
      *    12 13 14 15
      *
-     *  Reference: ITU-T H.264 §8.3.1.1
+     *  Reference: ITU-T H.264 Â§8.3.1.1
      */
     uint8_t getNeighborIntra4x4Mode(uint32_t mbX, uint32_t mbY,
                                      uint32_t blkIdx, bool isLeft,
                                      const uint8_t* curMbModes) const noexcept
     {
-        /// Default intra 4x4 prediction mode when neighbor unavailable — ITU-T H.264 §8.3.1.1.
+        /// Default intra 4x4 prediction mode when neighbor unavailable â€” ITU-T H.264 Â§8.3.1.1.
         static constexpr uint8_t cDefaultIntra4x4Mode = 2U; // DC
 
         uint32_t blkX = blkIdx & 3U;
@@ -1340,25 +1436,25 @@ private:
                        int32_t& qp, uint32_t mbX, uint32_t mbY) noexcept
     {
         (void)sps;
-        // §7.3.5 macroblock_layer() sequencing for I_4x4/I_8x8: [CHECKED §7.3.5]
-        //   Step 1 — mb_type: decoded in caller (mbTypeRaw==0 for I_NxN).
-        //   Step 2 — transform_size_8x8_flag u(1): MISSING HERE — not decoded for CAVLC
-        //             I_NxN when transform_8x8_mode_flag=1 in PPS. [UNCHECKED §7.3.5]
+        // Â§7.3.5 macroblock_layer() sequencing for I_4x4/I_8x8: [CHECKED Â§7.3.5]
+        //   Step 1 â€” mb_type: decoded in caller (mbTypeRaw==0 for I_NxN).
+        //   Step 2 â€” transform_size_8x8_flag u(1): MISSING HERE â€” not decoded for CAVLC
+        //             I_NxN when transform_8x8_mode_flag=1 in PPS. [UNCHECKED Â§7.3.5]
         //             (FM-3: missing syntax element. Benign only when pps.transform8x8Mode_==0.)
-        //   Step 3 — mb_pred: intra4x4_pred_mode per block (below). [CHECKED §7.3.5.1]
-        //   Step 4 — intra_chroma_pred_mode ue(v) (below). [CHECKED §7.3.5.1]
-        //   Step 5 — coded_block_pattern me(v) (below, present for I_4x4). [CHECKED §7.3.5]
-        //   Step 6 — mb_qp_delta se(v): only if cbp > 0. [CHECKED §7.3.5]
-        //   Step 7 — residual(0,15). [CHECKED §7.3.5.3]
-        // §7.3.5.1 mb_pred for I_NxN: prev_intra4x4_pred_mode_flag u(1) [+rem u(3)] per block.
+        //   Step 3 â€” mb_pred: intra4x4_pred_mode per block (below). [CHECKED Â§7.3.5.1]
+        //   Step 4 â€” intra_chroma_pred_mode ue(v) (below). [CHECKED Â§7.3.5.1]
+        //   Step 5 â€” coded_block_pattern me(v) (below, present for I_4x4). [CHECKED Â§7.3.5]
+        //   Step 6 â€” mb_qp_delta se(v): only if cbp > 0. [CHECKED Â§7.3.5]
+        //   Step 7 â€” residual(0,15). [CHECKED Â§7.3.5.3]
+        // Â§7.3.5.1 mb_pred for I_NxN: prev_intra4x4_pred_mode_flag u(1) [+rem u(3)] per block.
 
-        // §7.3.5 FM-3: transform_size_8x8_flag u(1) not decoded for CAVLC I_NxN.
-        // If pps.transform8x8Mode_!=0, the bitstream contains a flag we don't read —
+        // Â§7.3.5 FM-3: transform_size_8x8_flag u(1) not decoded for CAVLC I_NxN.
+        // If pps.transform8x8Mode_!=0, the bitstream contains a flag we don't read â€”
         // all subsequent bits shift by 1 and the entire MB decode is corrupted.
         if (pps.transform8x8Mode_ != 0U)
         {
             SUB0H264_UNSUPPORTED(
-                "CAVLC I_NxN: §7.3.5 requires transform_size_8x8_flag u(1) "
+                "CAVLC I_NxN: Â§7.3.5 requires transform_size_8x8_flag u(1) "
                 "before mb_pred when pps.transform8x8Mode_=1; not "
                 "implemented (FM-3)");
             return false;
@@ -1379,13 +1475,13 @@ private:
 
         for (uint32_t i = 0U; i < 16U; ++i)
         {
-            // Prediction modes are coded in spec scan order (§6.4.3).
+            // Prediction modes are coded in spec scan order (Â§6.4.3).
             // Store in raster order for consistent neighbor lookup.
             uint32_t rasterIdx = cLuma4x4ToRaster[i];
             uint8_t leftMode = getNeighborIntra4x4Mode(mbX, mbY, rasterIdx, true, predModes);
             uint8_t topMode  = getNeighborIntra4x4Mode(mbX, mbY, rasterIdx, false, predModes);
 
-            // §8.3.1.1: dcPredModePredictedFlag — when EITHER neighbor's macroblock
+            // Â§8.3.1.1: dcPredModePredictedFlag â€” when EITHER neighbor's macroblock
             // is unavailable, BOTH intraMxMPredModeA and intraMxMPredModeB are forced
             // to DC(2). The spec checks mbAddrA/mbAddrB availability, not individual
             // block availability. For edge blocks where the neighbor is in another MB,
@@ -1422,14 +1518,14 @@ private:
 #endif
         }
 
-        // §7.3.5.1 mb_pred step 4: intra_chroma_pred_mode ue(v). [CHECKED §7.3.5.1]
+        // Â§7.3.5.1 mb_pred step 4: intra_chroma_pred_mode ue(v). [CHECKED Â§7.3.5.1]
         uint32_t chromaPredMode = br.readUev();
 
-        // §7.3.5: coded_block_pattern me(v) — present for I_4x4 (NOT I_16x16). [CHECKED §7.3.5]
+        // Â§7.3.5: coded_block_pattern me(v) â€” present for I_4x4 (NOT I_16x16). [CHECKED Â§7.3.5]
         uint32_t cbpCode = br.readUev();
         uint8_t cbp = 0U;
         if (cbpCode < 48U)
-            cbp = cCbpTable[cbpCode][0]; // Intra CBP table (§9.1.2 Table 9-4)
+            cbp = cCbpTable[cbpCode][0]; // Intra CBP table (Â§9.1.2 Table 9-4)
         uint8_t cbpLuma = cbp & 0x0FU;
         uint8_t cbpChroma = (cbp >> 4U) & 0x03U;
 
@@ -1437,13 +1533,13 @@ private:
                                cbpLuma | (cbpChroma << 4U),
                                static_cast<uint32_t>(br.bitOffset()));
 
-        // §7.3.5: mb_qp_delta se(v) — only if cbp > 0 for I_4x4. [CHECKED §7.3.5]
+        // Â§7.3.5: mb_qp_delta se(v) â€” only if cbp > 0 for I_4x4. [CHECKED Â§7.3.5]
         // (FM-3: for I_16x16 this would always be present; for I_4x4 it is conditional.)
         if (cbp > 0U)
         {
             int32_t qpDelta = br.readSev();
             qp += qpDelta;
-            qp = ((qp % 52) + 52) % 52; // §7.4.5: proper modular wrapping
+            qp = ((qp % 52) + 52) % 52; // Â§7.4.5: proper modular wrapping
         }
 
 #if SUB0H264_TRACE
@@ -1455,8 +1551,8 @@ private:
         }
 #endif
 
-        // Zero NNZ for this MB — blocks not coded will retain 0.
-        // ITU-T H.264 §9.2.1: nC context depends on neighboring NNZ.
+        // Zero NNZ for this MB â€” blocks not coded will retain 0.
+        // ITU-T H.264 Â§9.2.1: nC context depends on neighboring NNZ.
         // Without this, uncoded blocks in I_4x4 MBs (groups where cbpLuma bit=0)
         // would use stale NNZ from the previous MB's decode, giving wrong nC
         // and causing CAVLC coeff_token misparse.
@@ -1473,7 +1569,7 @@ private:
 
         for (uint32_t blkIdx = 0U; blkIdx < 16U; ++blkIdx)
         {
-            // H.264 §6.4.3: iterate in spec scan order, not raster.
+            // H.264 Â§6.4.3: iterate in spec scan order, not raster.
             uint32_t blkX = cLuma4x4BlkX[blkIdx];
             uint32_t blkY = cLuma4x4BlkY[blkIdx];
             uint32_t rasterIdx = cLuma4x4ToRaster[blkIdx];
@@ -1481,7 +1577,7 @@ private:
             // Generate 4x4 prediction
             uint8_t pred4x4[16];
 
-            // Get neighbor samples for this 4x4 block — §8.3.1.1
+            // Get neighbor samples for this 4x4 block â€” Â§8.3.1.1
             uint32_t absX = mbX * cMbSize + blkX;
             uint32_t absY = mbY * cMbSize + blkY;
 
@@ -1533,7 +1629,7 @@ private:
                 for (uint32_t i = 0U; i < 16U; ++i)
                     coeffs[i] = resBlock.coeffs[i];
 
-                // Trace: RAW coefficients (before dequant) — use BlockResidual data field
+                // Trace: RAW coefficients (before dequant) â€” use BlockResidual data field
                 trace_.emit({TraceEventType::BlockResidual,
                              static_cast<uint16_t>(mbX), static_cast<uint16_t>(mbY),
                              blkIdx, static_cast<uint32_t>(nc),
@@ -1678,7 +1774,7 @@ private:
         intraPredChroma8x8(chromaMode, *activeFrame_, mbX, mbY, true, predU);
         intraPredChroma8x8(chromaMode, *activeFrame_, mbX, mbY, false, predV);
 
-        // §7.4.2.2 Chroma QP (FM-10: must use chromaQp, not luma QP)
+        // Â§7.4.2.2 Chroma QP (FM-10: must use chromaQp, not luma QP)
         int32_t chromaQp = computeChromaQp(qp, pps.chromaQpIndexOffset_);
 
         // Decode chroma DC if cbpChroma >= 1
@@ -1704,8 +1800,8 @@ private:
             inverseHadamard2x2(dcCb);
             inverseHadamard2x2(dcCr);
 
-            // Dequantize chroma DC — ITU-T H.264 §8.5.12.1. decodeChromaMb is
-            // called from the intra path only → use CbIntra/CrIntra
+            // Dequantize chroma DC â€” ITU-T H.264 Â§8.5.12.1. decodeChromaMb is
+            // called from the intra path only â†’ use CbIntra/CrIntra
             // weightScale[0][0] for the scaled variant.
             dequantChromaDcValues(dcCb, chromaQp, scalingLists_.list4x4[1][0]);
             dequantChromaDcValues(dcCr, chromaQp, scalingLists_.list4x4[2][0]);
@@ -1714,7 +1810,7 @@ private:
                 trace_.onChromaDcDequant(mbX, mbY, dcCb, dcCr);
         }
 
-        // ITU-T H.264 §7.3.5 residual_cavlc: all Cb AC blocks first, then all Cr AC blocks.
+        // ITU-T H.264 Â§7.3.5 residual_cavlc: all Cb AC blocks first, then all Cr AC blocks.
         // The outer loop over iCbCr (0=Cb, 1=Cr) is separate from the reconstruction loop.
         uint32_t mbIdx = mbY * widthInMbs_ + mbX;
 
@@ -1730,7 +1826,7 @@ private:
         }
 
         // Decode all Cb AC blocks (iCbCr=0), then all Cr AC blocks (iCbCr=1).
-        // Reference: ITU-T H.264 §7.3.5 residual_cavlc() syntax table.
+        // Reference: ITU-T H.264 Â§7.3.5 residual_cavlc() syntax table.
         if (cbpChroma >= 2U)
         {
             for (uint32_t blkIdx = 0U; blkIdx < 4U; ++blkIdx)
@@ -1742,7 +1838,7 @@ private:
                     cbCoeffsBuf[blkIdx][i] = acBlock.coeffs[i];
                 nnzCb_[mbIdx * 4U + blkIdx] = acBlock.totalCoeff;
                 // Save DC (already dequanted by Hadamard path), dequant AC, restore DC.
-                // ITU-T H.264 §8.5.12.1: DC was scaled in the Hadamard dequant above.
+                // ITU-T H.264 Â§8.5.12.1: DC was scaled in the Hadamard dequant above.
                 int16_t savedDcCb = cbCoeffsBuf[blkIdx][0];
                 dequantize4x4(cbCoeffsBuf[blkIdx], chromaQp, Block4x4Plane::CbIntra);
                 cbCoeffsBuf[blkIdx][0] = savedDcCb;
@@ -1781,7 +1877,7 @@ private:
         }
     }
 
-    // ── P-frame decode methods ──────────────────────────────────────────
+    // â”€â”€ P-frame decode methods â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     /** Fill all 16 4x4 blocks of an MB with the same MV (and optional MVD for CABAC context). */
     void setMbMotion(uint32_t mbIdx, MotionVector mv, int8_t refIdx,
@@ -1792,17 +1888,17 @@ private:
             mbMotion_[mbIdx * 16U + i] = info;
     }
 
-    /** Fill a partition's 4x4 blocks with MV + MVD — ITU-T H.264 §6.4.2.1.
+    /** Fill a partition's 4x4 blocks with MV + MVD â€” ITU-T H.264 Â§6.4.2.1.
      *
      *  Covers all P-slice mb_type values (Table 7-14):
-     *   0: P_L0_16x16     — 1 partition, fills all 16 blocks
-     *   1: P_L0_L0_16x8   — 2 partitions, each fills 2 rows × 4 cols = 8 blocks
-     *   2: P_L0_L0_8x16   — 2 partitions, each fills 4 rows × 2 cols = 8 blocks
-     *   3: P_8x8           — 4 sub-partitions, each fills 2×2 = 4 blocks
-     *   4: P_8x8ref0       — same as P_8x8
+     *   0: P_L0_16x16     â€” 1 partition, fills all 16 blocks
+     *   1: P_L0_L0_16x8   â€” 2 partitions, each fills 2 rows Ã— 4 cols = 8 blocks
+     *   2: P_L0_L0_8x16   â€” 2 partitions, each fills 4 rows Ã— 2 cols = 8 blocks
+     *   3: P_8x8           â€” 4 sub-partitions, each fills 2Ã—2 = 4 blocks
+     *   4: P_8x8ref0       â€” same as P_8x8
      *
      *  @param partIdx  Partition index (0-1 for 16x8/8x16, 0-3 for P_8x8, 0 for 16x16)
-     *  @param mvd      Decoded MVD — stored for CABAC §9.3.3.1.1.7 neighbor context
+     *  @param mvd      Decoded MVD â€” stored for CABAC Â§9.3.3.1.1.7 neighbor context
      */
     void setPartitionMotion(uint32_t mbIdx, uint32_t mbType, uint32_t partIdx,
                             MotionVector mv, int8_t refIdx,
@@ -1834,7 +1930,7 @@ private:
         case 3U: // P_8x8
         case 4U: // P_8x8ref0
         {
-            // 2x2 group of 4x4 blocks per sub-partition (§6.4.2.1)
+            // 2x2 group of 4x4 blocks per sub-partition (Â§6.4.2.1)
             // Layout: 0=TL(r0-1,c0-1), 1=TR(r0-1,c2-3), 2=BL(r2-3,c0-1), 3=BR(r2-3,c2-3)
             uint32_t startRow = (partIdx >> 1U) * 2U;
             uint32_t startCol = (partIdx & 1U) * 2U;
@@ -1864,7 +1960,7 @@ private:
         return mbMotion_[mbIdx * 16U + blkIdx];
     }
 
-    /** Get MV neighbor info for a macroblock (legacy — uses bottom-right 4x4). */
+    /** Get MV neighbor info for a macroblock (legacy â€” uses bottom-right 4x4). */
     MbMotionInfo getMbMotionNeighbor(uint32_t mbX, uint32_t mbY, int32_t dx, int32_t dy) const noexcept
     {
         int32_t nx = static_cast<int32_t>(mbX) + dx;
@@ -1873,10 +1969,10 @@ private:
             return {};
         // For left neighbor: read right column (blk col 3). For top: bottom row (blk row 3).
         // For topRight: bottom-left block.
-        uint32_t blkRow = (dy == -1) ? 3U : 0U; // top neighbor → bottom row of above MB
-        uint32_t blkCol = (dx == -1) ? 3U : 0U; // left neighbor → right col of left MB
-        if (dx == 1 && dy == -1) { blkRow = 3U; blkCol = 0U; } // topRight → bottom-left
-        if (dx == -1 && dy == -1) { blkRow = 3U; blkCol = 3U; } // topLeft → bottom-right
+        uint32_t blkRow = (dy == -1) ? 3U : 0U; // top neighbor â†’ bottom row of above MB
+        uint32_t blkCol = (dx == -1) ? 3U : 0U; // left neighbor â†’ right col of left MB
+        if (dx == 1 && dy == -1) { blkRow = 3U; blkCol = 0U; } // topRight â†’ bottom-left
+        if (dx == -1 && dy == -1) { blkRow = 3U; blkCol = 3U; } // topLeft â†’ bottom-right
         uint32_t mbIdx = ny * widthInMbs_ + nx;
         uint32_t blkIdx = blkRow * 4U + blkCol;
         return mbMotion_[mbIdx * 16U + blkIdx];
@@ -1884,8 +1980,8 @@ private:
 
     /** Decode a P_Skip macroblock: inferred MV, no residual.
      *
-     *  VALIDATED: §8.4.1.1 zero-MV condition matches spec (unavailable neighbor
-     *  → MV=0). MC full-pel copy verified pixel-exact vs IDR reference.
+     *  VALIDATED: Â§8.4.1.1 zero-MV condition matches spec (unavailable neighbor
+     *  â†’ MV=0). MC full-pel copy verified pixel-exact vs IDR reference.
      *  KNOWN ISSUE: P-frame row 2+ chroma diffs vs ffmpeg/libavc. Our output
      *  matches IDR at MV=(0,0); reference decoders produce output consistent
      *  with MV=(16,8). Likely a bitstream alignment issue in preceding MB
@@ -1895,16 +1991,16 @@ private:
                         uint32_t mbX, uint32_t mbY,
                         const SliceHeader& sh = {}) noexcept
     {
-        // Neighbor derivation — §6.4.11.7 for 16x16 partition, mbPartIdx=0.
+        // Neighbor derivation â€” Â§6.4.11.7 for 16x16 partition, mbPartIdx=0.
         // VALIDATED: getMbMotionNeighbor reads correct 4x4 block per partition layout.
         MbMotionInfo left    = getMbMotionNeighbor(mbX, mbY, -1, 0);
         MbMotionInfo top     = getMbMotionNeighbor(mbX, mbY, 0, -1);
         MbMotionInfo topRight = getMbMotionNeighbor(mbX, mbY, 1, -1);
         if (!topRight.available)
-            topRight = getMbMotionNeighbor(mbX, mbY, -1, -1); // D fallback §8.4.1.3
+            topRight = getMbMotionNeighbor(mbX, mbY, -1, -1); // D fallback Â§8.4.1.3
 
-        // §8.4.1.1: If mbAddrA or mbAddrB unavailable, or either has (ref=0,MV=0,0),
-        // then skip MV = (0,0). Otherwise, MV = median predictor from §8.4.1.3.
+        // Â§8.4.1.1: If mbAddrA or mbAddrB unavailable, or either has (ref=0,MV=0,0),
+        // then skip MV = (0,0). Otherwise, MV = median predictor from Â§8.4.1.3.
         // VALIDATED against spec text. Produces MV=(0,0) when left unavailable (mbX=0).
         MotionVector skipMv = {0, 0};
         if (left.available && top.available &&
@@ -1929,7 +2025,7 @@ private:
         lumaMotionComp(ref, refX, refY, dx, dy, cMbSize, cMbSize,
                         target.yMb(mbX, mbY), target.yStride());
 
-        // Chroma — derive from luma MV (divide by 2, eighth-pel)
+        // Chroma â€” derive from luma MV (divide by 2, eighth-pel)
         int32_t chromaRefX = static_cast<int32_t>(mbX * cChromaBlockSize) + (skipMv.x >> 3);
         int32_t chromaRefY = static_cast<int32_t>(mbY * cChromaBlockSize) + (skipMv.y >> 3);
         uint32_t cdx = static_cast<uint32_t>(skipMv.x) & 7U;
@@ -1943,7 +2039,7 @@ private:
                          cChromaBlockSize, cChromaBlockSize, false,
                          target.vMb(mbX, mbY), target.uvStride());
 
-        // Weighted prediction — §8.4.2.3.1 (P_Skip uses ref_idx=0)
+        // Weighted prediction â€” Â§8.4.2.3.1 (P_Skip uses ref_idx=0)
         if (sh.hasWeightTable_)
         {
             const auto& w = sh.weightL0_[0];
@@ -1959,18 +2055,18 @@ private:
         std::fill_n(&nnzLuma_[mbIdx * 16U], 16U, static_cast<uint8_t>(0U));
     }
 
-    /** Decode P-inter macroblock — §7.3.5 mb_pred / sub_mb_pred.
+    /** Decode P-inter macroblock â€” Â§7.3.5 mb_pred / sub_mb_pred.
      *
      *  Handles P_L0_16x16, P_L0_L0_16x8, P_L0_L0_8x16, P_8x8, P_8x8ref0.
      *
      *  VALIDATED: Bitstream parsing bit-aligned with libavc through MB(4,0).
      *  VALIDATED: P_8x8 sub-partition MVDs correctly stored (shadow var fix).
-     *  VALIDATED: 8x16/16x8 directional shortcuts per §8.4.1.3.1.
+     *  VALIDATED: 8x16/16x8 directional shortcuts per Â§8.4.1.3.1.
      *  VALIDATED: Per-4x4-block MV storage for partition-aware neighbor derivation.
      *  KNOWN ISSUE: Residual bit consumption may be off by ~1 bit for some
      *  chroma AC blocks, causing skip_run misalignment after row 1.
      *
-     *  @param mbQp  [in/out] Accumulated QP — ITU-T H.264 §7.4.5.
+     *  @param mbQp  [in/out] Accumulated QP â€” ITU-T H.264 Â§7.4.5.
      */
     void decodePInterMb(BitReader& br, const Sps& sps, const Pps& pps,
                          const SliceHeader& sh,
@@ -1991,21 +2087,21 @@ private:
             trace_.onBlockResidual(mbX, mbY, 95U, numRefIdxL0Active, mbTypeRaw, 0U);
         // mbTypeRaw: 0=P_L0_16x16, 1=P_L0_L0_16x8, 2=P_L0_L0_8x16, 3=P_8x8, 4=P_8x8ref0
 
-        // §7.3.5 macroblock_layer() sequencing for P-inter: [CHECKED §7.3.5]
-        //   Step 1 — mb_type: decoded in caller.
-        //   Step 2 — mb_pred (§7.3.5.1): ref_idx ALL partitions, then mvd ALL partitions.
+        // Â§7.3.5 macroblock_layer() sequencing for P-inter: [CHECKED Â§7.3.5]
+        //   Step 1 â€” mb_type: decoded in caller.
+        //   Step 2 â€” mb_pred (Â§7.3.5.1): ref_idx ALL partitions, then mvd ALL partitions.
         //             (FM-1: ref_idx and mvd MUST be separate loops, not interleaved.)
-        //             For P_8x8: sub_mb_type all → ref_idx all → mvd all (§7.3.5.2).
-        //   Step 3 — coded_block_pattern me(v): present (NOT I_16x16). [CHECKED §7.3.5]
-        //   Step 4 — transform_size_8x8_flag u(1): MISSING HERE for CAVLC streams with
-        //             transform_8x8_mode_flag=1. [UNCHECKED §7.3.5]
+        //             For P_8x8: sub_mb_type all â†’ ref_idx all â†’ mvd all (Â§7.3.5.2).
+        //   Step 3 â€” coded_block_pattern me(v): present (NOT I_16x16). [CHECKED Â§7.3.5]
+        //   Step 4 â€” transform_size_8x8_flag u(1): MISSING HERE for CAVLC streams with
+        //             transform_8x8_mode_flag=1. [UNCHECKED Â§7.3.5]
         //             (FM-3: condition: CodedBlockPatternLuma>0 && transform_8x8_mode_flag
         //              && mb_type!=I_NxN && noSubMbPartSizeLessThan8x8Flag.)
-        //   Step 5 — mb_qp_delta se(v): only if cbp > 0. [CHECKED §7.3.5]
-        //   Step 6 — residual(0,15). [CHECKED §7.3.5.3]
-        // §7.3.5.1 mb_pred: ref_idx_l0 ALL partitions loop, THEN mvd_l0 ALL partitions loop.
+        //   Step 5 â€” mb_qp_delta se(v): only if cbp > 0. [CHECKED Â§7.3.5]
+        //   Step 6 â€” residual(0,15). [CHECKED Â§7.3.5.3]
+        // Â§7.3.5.1 mb_pred: ref_idx_l0 ALL partitions loop, THEN mvd_l0 ALL partitions loop.
         // 0=P_L0_16x16 (1 partition), 1=P_L0_L0_16x8 (2), 2=P_L0_L0_8x16 (2)
-        // 3=P_8x8 (4 sub-MBs via sub_mb_pred §7.3.5.2), 4=P_8x8ref0 (4 sub-MBs, ref=0)
+        // 3=P_8x8 (4 sub-MBs via sub_mb_pred Â§7.3.5.2), 4=P_8x8ref0 (4 sub-MBs, ref=0)
         int16_t mvdX[4] = {}, mvdY[4] = {};
         int16_t subMvdX[4] = {}, subMvdY[4] = {}; // Per-8x8 MVDs for P_8x8
         uint8_t refIdxL0[4] = {};  // Per-partition ref_idx (0-based)
@@ -2016,13 +2112,13 @@ private:
             // 16x16, 16x8, or 8x16: 1 or 2 partitions
             numParts = (mbTypeRaw == 0U) ? 1U : 2U;
 
-            // Read ref_idx for each partition — §7.3.5.1
+            // Read ref_idx for each partition â€” Â§7.3.5.1
             for (uint32_t p = 0U; p < numParts; ++p)
             {
                 if (numRefIdxL0Active > 1U)
                 {
                     if (numRefIdxL0Active == 2U)
-                        refIdxL0[p] = static_cast<uint8_t>(1U - br.readBit()); // te(v) range=1 §9.1
+                        refIdxL0[p] = static_cast<uint8_t>(1U - br.readBit()); // te(v) range=1 Â§9.1
                     else
                         refIdxL0[p] = static_cast<uint8_t>(br.readUev()); // te(v) range>1
                 }
@@ -2037,13 +2133,13 @@ private:
         }
         else
         {
-            // P_8x8 or P_8x8ref0: sub_mb_pred — §7.3.5.2
+            // P_8x8 or P_8x8ref0: sub_mb_pred â€” Â§7.3.5.2
             // Read 4 sub_mb_type values
             uint32_t subMbType[4];
             for (uint32_t s = 0U; s < 4U; ++s)
                 subMbType[s] = br.readUev();
 
-            // Read ref_idx for each 8x8 partition — §7.3.5.2
+            // Read ref_idx for each 8x8 partition â€” Â§7.3.5.2
             // P_8x8ref0: all ref_idx = 0 (not read from bitstream).
             if (mbTypeRaw == 3U) // P_8x8 (not ref0)
             {
@@ -2052,16 +2148,16 @@ private:
                     if (numRefIdxL0Active > 1U)
                     {
                         if (numRefIdxL0Active == 2U)
-                            refIdxL0[s] = static_cast<uint8_t>(1U - br.readBit()); // te(v) §9.1
+                            refIdxL0[s] = static_cast<uint8_t>(1U - br.readBit()); // te(v) Â§9.1
                         else
                             refIdxL0[s] = static_cast<uint8_t>(br.readUev());
                     }
                 }
             }
 
-            // Read MVD for each sub-partition — §7.3.5.2.
+            // Read MVD for each sub-partition â€” Â§7.3.5.2.
             // sub_mb_type: 0=P_L0_8x8(1 MVD), 1=P_L0_8x4(2), 2=P_L0_4x8(2), 3=P_L0_4x4(4)
-            // Only P_L0_8x8 (sub_mb_type==0) fully supported — sub-partition MC
+            // Only P_L0_8x8 (sub_mb_type==0) fully supported â€” sub-partition MC
             // requires per-sub-partition MV storage not yet implemented.
             for (uint32_t s = 0U; s < 4U; ++s)
             {
@@ -2069,8 +2165,8 @@ private:
                 {
                     SUB0H264_UNSUPPORTED(
                         "P_8x8 sub_mb_type != 0 (8x4/4x8/4x4) not "
-                        "implemented — sub-partition MC requires per-"
-                        "sub-partition MV storage §7.3.5.2");
+                        "implemented â€” sub-partition MC requires per-"
+                        "sub-partition MV storage Â§7.3.5.2");
                     return;  // Graceful release degradation: skip MB decode
                 }
 
@@ -2087,7 +2183,7 @@ private:
             }
         }
 
-        // Compute per-partition MV predictors — ITU-T H.264 §8.4.1.3.
+        // Compute per-partition MV predictors â€” ITU-T H.264 Â§8.4.1.3.
         // Use per-4x4-block neighbor lookups for partition-aware prediction.
         int32_t mb4x = static_cast<int32_t>(mbX) * 4;
         int32_t mb4y = static_cast<int32_t>(mbY) * 4;
@@ -2110,7 +2206,7 @@ private:
         }
         else if (mbTypeRaw == 1U)
         {
-            // P_L0_L0_16x8: §8.4.1.3.1
+            // P_L0_L0_16x8: Â§8.4.1.3.1
             // Partition 0 (top 16x8): B=top neighbor directly if same refIdx
             {
                 MbMotionInfo a0 = getMotionAt4x4(mb4x - 1, mb4y);
@@ -2120,7 +2216,7 @@ private:
                 int8_t ri0 = static_cast<int8_t>(refIdxL0[0]);
                 MotionVector mvp0;
                 if (b0.available && b0.refIdx == ri0)
-                    mvp0 = b0.mv; // directional shortcut — §8.4.1.3.1
+                    mvp0 = b0.mv; // directional shortcut â€” Â§8.4.1.3.1
                 else
                     mvp0 = computeMvPredictor(a0, b0, c0, ri0);
                 mvPart[0] = { static_cast<int16_t>(mvp0.x + mvdX[0]),
@@ -2128,21 +2224,21 @@ private:
                 trace_.onMvPrediction(mbX, mbY, 0, mvp0, {mvdX[0], mvdY[0]}, mvPart[0], a0, b0, c0);
             }
 
-            // Partition 1 (bottom 16x8): §8.4.1.3.1 directional shortcut: use LEFT.
+            // Partition 1 (bottom 16x8): Â§8.4.1.3.1 directional shortcut: use LEFT.
             {
                 MbMotionInfo a1 = getMotionAt4x4(mb4x - 1, mb4y + 2); // left at row 2
                 MbMotionInfo b1 = { mvPart[0], {}, static_cast<int8_t>(refIdxL0[0]), true }; // partition 0
-                // C = top-right of partition at (16, 7) relative to MB → unavailable.
+                // C = top-right of partition at (16, 7) relative to MB â†’ unavailable.
                 MbMotionInfo c1 = getMotionAt4x4(mb4x + 4, mb4y + 1);
                 if (!c1.available)
                 {
-                    // D = top-left of partition at (-1, 7) → left MB's (col 3, row 1). §8.4.1.3
+                    // D = top-left of partition at (-1, 7) â†’ left MB's (col 3, row 1). Â§8.4.1.3
                     c1 = getMotionAt4x4(mb4x - 1, mb4y + 1);
                 }
                 int8_t ri1 = static_cast<int8_t>(refIdxL0[1]);
                 MotionVector mvp1;
                 if (a1.available && a1.refIdx == ri1)
-                    mvp1 = a1.mv; // directional shortcut — §8.4.1.3.1
+                    mvp1 = a1.mv; // directional shortcut â€” Â§8.4.1.3.1
                 else
                     mvp1 = computeMvPredictor(a1, b1, c1, ri1);
                 mvPart[1] = { static_cast<int16_t>(mvp1.x + mvdX[1]),
@@ -2152,7 +2248,7 @@ private:
         }
         else if (mbTypeRaw == 2U)
         {
-            // P_L0_L0_8x16: §8.4.1.3.1
+            // P_L0_L0_8x16: Â§8.4.1.3.1
             // Partition 0 (left 8x16): A=left neighbor directly if same refIdx
             {
                 MbMotionInfo a0 = getMotionAt4x4(mb4x - 1, mb4y);
@@ -2162,7 +2258,7 @@ private:
                 int8_t ri0 = static_cast<int8_t>(refIdxL0[0]);
                 MotionVector mvp0;
                 if (a0.available && a0.refIdx == ri0)
-                    mvp0 = a0.mv; // directional shortcut — §8.4.1.3.1
+                    mvp0 = a0.mv; // directional shortcut â€” Â§8.4.1.3.1
                 else
                     mvp0 = computeMvPredictor(a0, b0, c0, ri0);
                 mvPart[0] = { static_cast<int16_t>(mvp0.x + mvdX[0]),
@@ -2180,7 +2276,7 @@ private:
                 int8_t ri1 = static_cast<int8_t>(refIdxL0[1]);
                 MotionVector mvp1;
                 if (c1.available && c1.refIdx == ri1)
-                    mvp1 = c1.mv; // directional shortcut — §8.4.1.3.1
+                    mvp1 = c1.mv; // directional shortcut â€” Â§8.4.1.3.1
                 else
                     mvp1 = computeMvPredictor(a1, b1, c1, ri1);
                 mvPart[1] = { static_cast<int16_t>(mvp1.x + mvdX[1]),
@@ -2190,7 +2286,7 @@ private:
         }
         else
         {
-            // P_8x8/P_8x8ref0: per-8x8 sub-partition MV prediction — §8.4.1.3.
+            // P_8x8/P_8x8ref0: per-8x8 sub-partition MV prediction â€” Â§8.4.1.3.
             // 4 sub-partitions in raster order: TL(0), TR(1), BL(2), BR(3).
             // Each 8x8 sub-partition has its own MV = MVP + MVD.
             // Store MVs immediately so subsequent sub-partitions can use them.
@@ -2206,7 +2302,7 @@ private:
                 int32_t sx = mb4x + subOffX[s];
                 int32_t sy = mb4y + subOffY[s];
 
-                // Neighbors for this 8x8 sub-partition — §8.4.1.3
+                // Neighbors for this 8x8 sub-partition â€” Â§8.4.1.3
                 MbMotionInfo a = getMotionAt4x4(sx - 1, sy);
                 MbMotionInfo b = getMotionAt4x4(sx, sy - 1);
                 MbMotionInfo c = getMotionAt4x4(sx + 2, sy - 1);
@@ -2243,7 +2339,7 @@ private:
         }
         // P_8x8 MVs were stored incrementally in the sub-partition loop above.
 
-        // Per-partition motion compensation — ITU-T H.264 §8.4.2
+        // Per-partition motion compensation â€” ITU-T H.264 Â§8.4.2
         // Reference frame lookup per partition via DPB L0 list.
         auto getRef = [this](uint8_t idx) -> const Frame& {
             const Frame* f = dpb_.getReference(idx);
@@ -2277,7 +2373,7 @@ private:
             chromaMotionComp(ref, cRefX, cRefY, static_cast<uint32_t>(mv.x) & 7U,
                              static_cast<uint32_t>(mv.y) & 7U,
                              cChromaBlockSize, cChromaBlockSize, false, predV, cChromaBlockSize);
-            // Weighted prediction — §8.4.2.3.1
+            // Weighted prediction â€” Â§8.4.2.3.1
             if (sh.hasWeightTable_)
             {
                 const auto& w = sh.weightL0_[refIdxL0[0]];
@@ -2319,7 +2415,7 @@ private:
                                  static_cast<uint32_t>(mv.y) & 7U,
                                  8U, 4U, false,
                                  predV + cPartOffY * cChromaBlockSize, cChromaBlockSize);
-                // Weighted prediction — §8.4.2.3.1 (per 16x8 partition)
+                // Weighted prediction â€” Â§8.4.2.3.1 (per 16x8 partition)
                 if (sh.hasWeightTable_)
                 {
                     const auto& w = sh.weightL0_[refIdxL0[p]];
@@ -2362,7 +2458,7 @@ private:
                                  static_cast<uint32_t>(mv.y) & 7U,
                                  4U, 8U, false,
                                  predV + cPartOffX, cChromaBlockSize);
-                // Weighted prediction — §8.4.2.3.1 (per 8x16 partition)
+                // Weighted prediction â€” Â§8.4.2.3.1 (per 8x16 partition)
                 if (sh.hasWeightTable_)
                 {
                     const auto& w = sh.weightL0_[refIdxL0[p]];
@@ -2377,7 +2473,7 @@ private:
         }
         else
         {
-            // P_8x8 / P_8x8ref0: per-8x8 motion compensation — §8.4.2.
+            // P_8x8 / P_8x8ref0: per-8x8 motion compensation â€” Â§8.4.2.
             // 4 sub-partitions: TL(0), TR(1), BL(2), BR(3), each 8x8 luma / 4x4 chroma.
             static constexpr uint32_t subLumaOffX[4] = {0, 8, 0, 8};
             static constexpr uint32_t subLumaOffY[4] = {0, 0, 8, 8};
@@ -2411,7 +2507,7 @@ private:
                                  static_cast<uint32_t>(mv.y) & 7U,
                                  4U, 4U, false,
                                  predV + coy * cChromaBlockSize + cox, cChromaBlockSize);
-                // Weighted prediction — §8.4.2.3.1 (per 8x8 sub-MB)
+                // Weighted prediction â€” Â§8.4.2.3.1 (per 8x8 sub-MB)
                 if (sh.hasWeightTable_)
                 {
                     const auto& w = sh.weightL0_[refIdxL0[s]];
@@ -2425,25 +2521,25 @@ private:
             }
         }
 
-        // §7.3.5: coded_block_pattern me(v) — present for P-inter (not I_16x16). [CHECKED §7.3.5]
+        // Â§7.3.5: coded_block_pattern me(v) â€” present for P-inter (not I_16x16). [CHECKED Â§7.3.5]
         trace_.onMbEnd(mbX, mbY, static_cast<uint32_t>(br.bitOffset())); // pre-CBP bit
         uint32_t cbpCode = br.readUev();
         uint8_t cbp = 0U;
         if (cbpCode < 48U)
-            cbp = cCbpTable[cbpCode][1]; // Inter CBP table (§9.1.2 Table 9-4)
+            cbp = cCbpTable[cbpCode][1]; // Inter CBP table (Â§9.1.2 Table 9-4)
 
         uint8_t cbpLuma = cbp & 0x0FU;
         uint8_t cbpChroma = (cbp >> 4U) & 0x03U;
 
-        // §7.3.5 FM-3: transform_size_8x8_flag u(1) not decoded after CBP for CAVLC P-inter.
+        // Â§7.3.5 FM-3: transform_size_8x8_flag u(1) not decoded after CBP for CAVLC P-inter.
         // Condition from spec: CodedBlockPatternLuma>0 && transform_8x8_mode_flag
         //   && mb_type!=I_NxN && noSubMbPartSizeLessThan8x8Flag.
         // For P_L0_16x16/16x8/8x16, noSubMbPartSizeLessThan8x8Flag=1 always, so the
-        // flag would be present when cbpLuma>0 and 8x8 mode enabled — but we don't read it.
+        // flag would be present when cbpLuma>0 and 8x8 mode enabled â€” but we don't read it.
         if (pps.transform8x8Mode_ != 0U && cbpLuma != 0U)
         {
             SUB0H264_UNSUPPORTED(
-                "CAVLC P-inter: §7.3.5 requires transform_size_8x8_flag u(1) "
+                "CAVLC P-inter: Â§7.3.5 requires transform_size_8x8_flag u(1) "
                 "after CBP when pps.transform8x8Mode_=1 and cbpLuma>0; not "
                 "implemented (FM-3)");
             return;  // Graceful release degradation: skip MB decode
@@ -2452,15 +2548,15 @@ private:
         trace_.onBlockResidual(mbX, mbY, 99U, cbpCode, cbpLuma | (cbpChroma << 4U),
                                static_cast<uint32_t>(br.bitOffset()));
         int32_t qp = mbQp;
-        // §7.3.5: mb_qp_delta se(v) — only if cbp > 0 for P-inter. [CHECKED §7.3.5]
+        // Â§7.3.5: mb_qp_delta se(v) â€” only if cbp > 0 for P-inter. [CHECKED Â§7.3.5]
         if (cbp > 0U)
         {
             int32_t qpDelta = br.readSev();
             qp += qpDelta;
-            qp = ((qp % 52) + 52) % 52; // §7.4.5: proper modular wrapping
+            qp = ((qp % 52) + 52) % 52; // Â§7.4.5: proper modular wrapping
         }
 
-        // §7.3.5.3: residual(0,15) — luma then chroma. [CHECKED §7.3.5.3]
+        // Â§7.3.5.3: residual(0,15) â€” luma then chroma. [CHECKED Â§7.3.5.3]
         uint32_t yStride = target.yStride();
         for (uint32_t blkIdx = 0U; blkIdx < 16U; ++blkIdx)
         {
@@ -2496,7 +2592,7 @@ private:
         }
 
         // Decode chroma residual and reconstruct
-        // §7.4.2.2 Chroma QP (FM-10: must use chromaQp, not luma QP)
+        // Â§7.4.2.2 Chroma QP (FM-10: must use chromaQp, not luma QP)
         int32_t chromaQp = computeChromaQp(qp, pps.chromaQpIndexOffset_);
 
         int16_t dcCb[4] = {}, dcCr[4] = {};
@@ -2515,13 +2611,13 @@ private:
             inverseHadamard2x2(dcCb);
             inverseHadamard2x2(dcCr);
 
-            // §8.5.11 + §8.5.12.1: Chroma DC dequant (FM-10: chromaQp used, not luma QP).
-            // P-inter path → CbInter/CrInter weightScale[0][0].
+            // Â§8.5.11 + Â§8.5.12.1: Chroma DC dequant (FM-10: chromaQp used, not luma QP).
+            // P-inter path â†’ CbInter/CrInter weightScale[0][0].
             dequantChromaDcValues(dcCb, chromaQp, scalingLists_.list4x4[4][0]);
             dequantChromaDcValues(dcCr, chromaQp, scalingLists_.list4x4[5][0]);
         }
 
-        // Stash per-block AC coefficients — decode all Cb first, then Cr (§7.3.5)
+        // Stash per-block AC coefficients â€” decode all Cb first, then Cr (Â§7.3.5)
         int16_t cbCoeffsBuf[4][16] = {};
         int16_t crCoeffsBuf[4][16] = {};
         for (uint32_t blkIdx = 0U; blkIdx < 4U; ++blkIdx)
@@ -2532,7 +2628,7 @@ private:
 
         if (cbpChroma >= 2U)
         {
-            // All Cb AC blocks first — §7.3.5.3
+            // All Cb AC blocks first â€” Â§7.3.5.3
             for (uint32_t blkIdx = 0U; blkIdx < 4U; ++blkIdx)
             {
                 int32_t ncCb = getChromaNc(mbX, mbY, blkIdx, true);
@@ -2547,7 +2643,7 @@ private:
                 dequantize4x4(cbCoeffsBuf[blkIdx], chromaQp, Block4x4Plane::CbInter);
                 cbCoeffsBuf[blkIdx][0] = savedDc;
             }
-            // Then all Cr AC blocks — §7.3.5.3
+            // Then all Cr AC blocks â€” Â§7.3.5.3
             for (uint32_t blkIdx = 0U; blkIdx < 4U; ++blkIdx)
             {
                 int32_t ncCr = getChromaNc(mbX, mbY, blkIdx, false);
@@ -2583,7 +2679,7 @@ private:
      *
      *  NOTE: The I-MB decode functions write to currentFrame_. For P-slices,
      *  the decode target is a separate DPB entry. We copy the decoded MB
-     *  from currentFrame_ → target after decode. §7.3.5
+     *  from currentFrame_ â†’ target after decode. Â§7.3.5
      */
     bool decodeIntraMbInPSlice(BitReader& br, const Sps& sps, const Pps& pps,
                                 const SliceHeader& sh, int32_t& mbQp,
@@ -2597,11 +2693,11 @@ private:
         //TODO: Should we track I_NxN here for future neighbor context derivation? It's not needed for intra decode since no CABAC, but it would be needed if we later switch to CABAC for intra in P-slices.
         if (mbTypeRaw == 25U)
         {
-            // Intra-in-P I_PCM (§7.3.5) — same alignment hazard as other
-            // I_PCM paths. NOT IMPLEMENTED — subsequent bitstream is
+            // Intra-in-P I_PCM (Â§7.3.5) â€” same alignment hazard as other
+            // I_PCM paths. NOT IMPLEMENTED â€” subsequent bitstream is
             // misaligned after the raw PCM samples.
             SUB0H264_UNSUPPORTED(
-                "Intra-in-P I_PCM (§7.3.5) not implemented — "
+                "Intra-in-P I_PCM (Â§7.3.5) not implemented â€” "
                 "subsequent bitstream is misaligned.");
             return false;
         }
@@ -2621,10 +2717,10 @@ private:
         return ok;
     }
 
-    // ── CABAC-specific MB decode methods ────────────────────────────────
+    // â”€â”€ CABAC-specific MB decode methods â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     /** Decode an intra MB using CABAC.
-     *  @param mbQp  [in/out] Accumulated QP — ITU-T H.264 §7.4.5.
+     *  @param mbQp  [in/out] Accumulated QP â€” ITU-T H.264 Â§7.4.5.
      */
     bool decodeCabacIntraMb(BitReader& br, const Sps& sps, const Pps& pps,
                              const SliceHeader& sh, int32_t& mbQp,
@@ -2634,7 +2730,7 @@ private:
         uint32_t mbIdx = mbY * widthInMbs_ + mbX;
         setMbMotion(mbIdx, {0, 0}, -1);
 
-        // §9.3.3.1.2: condTermFlagN for mb_type in I-slices.
+        // Â§9.3.3.1.2: condTermFlagN for mb_type in I-slices.
         // condTermFlagN = 0 when neighbor unavailable OR is I_NxN.
         // condTermFlagN = 1 ONLY when neighbor available AND NOT I_NxN.
         // Verified: ffmpeg/NXPlay both use condTerm=0 for unavailable.
@@ -2653,10 +2749,10 @@ private:
         cabacNeighbor_[mbIdx].setI4x4(mbTypeRaw == 0U);
         if (mbTypeRaw == 25U)
         {
-            // CABAC I-slice I_PCM (§9.3.3.1.1) — raw samples follow.
-            // NOT IMPLEMENTED — subsequent bitstream misaligned.
+            // CABAC I-slice I_PCM (Â§9.3.3.1.1) â€” raw samples follow.
+            // NOT IMPLEMENTED â€” subsequent bitstream misaligned.
             SUB0H264_UNSUPPORTED(
-                "CABAC I-slice I_PCM (§9.3.3.1.1) not implemented — "
+                "CABAC I-slice I_PCM (Â§9.3.3.1.1) not implemented â€” "
                 "subsequent bitstream is misaligned.");
             return false;
         }
@@ -2680,17 +2776,17 @@ private:
         //TODO: add specification references for the sequencing (high importance) and the logic at all steps
 
         (void)sps;
-        // §7.3.5 macroblock_layer() sequencing for I_NxN (CABAC): [CHECKED §7.3.5]
-        //   Step 1 — mb_type: decoded in caller (mbTypeRaw==0 for I_NxN).
-        //   Step 2 — transform_size_8x8_flag ae(v): BEFORE mb_pred for I_NxN. [CHECKED §7.3.5]
-        //             (FM-1: must precede pred mode loop — determines 4x4 vs 8x8 block size.)
-        //   Step 3 — mb_pred: intra4x4_pred_mode per block below. [CHECKED §7.3.5.1]
-        //   Step 4 — intra_chroma_pred_mode ae(v) below. [CHECKED §7.3.5.1]
-        //   Step 5 — coded_block_pattern ae(v): present for I_NxN. [CHECKED §7.3.5]
-        //   Step 6 — mb_qp_delta ae(v): only if cbp > 0. [CHECKED §7.3.5]
-        //   Step 7 — residual(0,15). [CHECKED §7.3.5.3]
+        // Â§7.3.5 macroblock_layer() sequencing for I_NxN (CABAC): [CHECKED Â§7.3.5]
+        //   Step 1 â€” mb_type: decoded in caller (mbTypeRaw==0 for I_NxN).
+        //   Step 2 â€” transform_size_8x8_flag ae(v): BEFORE mb_pred for I_NxN. [CHECKED Â§7.3.5]
+        //             (FM-1: must precede pred mode loop â€” determines 4x4 vs 8x8 block size.)
+        //   Step 3 â€” mb_pred: intra4x4_pred_mode per block below. [CHECKED Â§7.3.5.1]
+        //   Step 4 â€” intra_chroma_pred_mode ae(v) below. [CHECKED Â§7.3.5.1]
+        //   Step 5 â€” coded_block_pattern ae(v): present for I_NxN. [CHECKED Â§7.3.5]
+        //   Step 6 â€” mb_qp_delta ae(v): only if cbp > 0. [CHECKED Â§7.3.5]
+        //   Step 7 â€” residual(0,15). [CHECKED Â§7.3.5.3]
 
-        // §7.3.5: transform_size_8x8_flag before mb_pred for I_NxN.
+        // Â§7.3.5: transform_size_8x8_flag before mb_pred for I_NxN.
         uint32_t mbIdx = mbY * widthInMbs_ + mbX;
         bool use8x8Transform = false;
         if (pps.transform8x8Mode_ != 0U)
@@ -2710,12 +2806,12 @@ private:
         for (uint32_t i = 0U; i < numModeBlocks; ++i)
         {
             // For I_8x8: 4 blocks in 8x8 scan order (TL, TR, BL, BR)
-            // For I_4x4: 16 blocks in spec scan order §6.4.3
+            // For I_4x4: 16 blocks in spec scan order Â§6.4.3
             uint32_t rasterIdx;
             if (use8x8Transform)
             {
-                // 8x8 block i → top-left 4x4 raster index for neighbor lookup
-                // Block 0→raster 0, Block 1→raster 2, Block 2→raster 8, Block 3→raster 10
+                // 8x8 block i â†’ top-left 4x4 raster index for neighbor lookup
+                // Block 0â†’raster 0, Block 1â†’raster 2, Block 2â†’raster 8, Block 3â†’raster 10
                 static constexpr uint32_t c8x8ToRaster[4] = {0U, 2U, 8U, 10U};
                 rasterIdx = c8x8ToRaster[i];
             }
@@ -2724,11 +2820,11 @@ private:
                 rasterIdx = cLuma4x4ToRaster[i];
             }
 
-            // §8.3.1.2.1: neighbor mode derivation (always needed — MPM uses both)
+            // Â§8.3.1.2.1: neighbor mode derivation (always needed â€” MPM uses both)
             uint8_t leftMode = getNeighborIntra4x4Mode(mbX, mbY, rasterIdx, true, predModes);
             uint8_t topMode  = getNeighborIntra4x4Mode(mbX, mbY, rasterIdx, false, predModes);
 
-            // §8.3.1.1: dcPredModePredictedFlag — force BOTH to DC when either
+            // Â§8.3.1.1: dcPredModePredictedFlag â€” force BOTH to DC when either
             // neighbor's macroblock is unavailable. [FM-22]
             bool leftMbUnavail = (rasterIdx % 4U == 0U) && (mbX == 0U);
             bool topMbUnavail  = (rasterIdx < 4U) && (mbY == 0U);
@@ -2739,9 +2835,9 @@ private:
             }
             uint8_t mpm = (leftMode < topMode) ? leftMode : topMode;
 
-            // §8.3.1.1: Derivation of Intra4x4PredMode
-            // prev_intra4x4_pred_mode_flag=1 → mode = predIntra4x4PredMode (MPM)
-            // prev_intra4x4_pred_mode_flag=0 → mode = rem if rem < MPM, else rem + 1
+            // Â§8.3.1.1: Derivation of Intra4x4PredMode
+            // prev_intra4x4_pred_mode_flag=1 â†’ mode = predIntra4x4PredMode (MPM)
+            // prev_intra4x4_pred_mode_flag=0 â†’ mode = rem if rem < MPM, else rem + 1
             // CABAC: flag at ctx[68], rem at ctx[69] (3 context-coded bins, LSB-first)
             uint8_t result = cabacDecodeIntra4x4PredMode(cabacEngine_, cabacCtx_.data());
             uint8_t mode;
@@ -2766,7 +2862,7 @@ private:
 
             if (use8x8Transform)
             {
-                // §6.4.3: scan order maps 8x8 block to constituent 4x4 blocks
+                // Â§6.4.3: scan order maps 8x8 block to constituent 4x4 blocks
                 // Propagate mode to all 4 constituent 4x4 blocks for neighbor lookup
                 static constexpr uint32_t c8x8Sub[4][4] = {
                     {0U, 1U, 4U, 5U}, {2U, 3U, 6U, 7U},
@@ -2781,13 +2877,13 @@ private:
             }
         }
 
-        // Chroma pred mode — §9.3.3.1.1.7: ctxInc from neighbor chroma modes
+        // Chroma pred mode â€” Â§9.3.3.1.1.7: ctxInc from neighbor chroma modes
         uint32_t chromaCtxInc = cabacNeighbor_.chromaModeCtxInc(mbX, mbY);
         uint32_t chromaPredMode = cabacDecodeIntraChromaMode(cabacEngine_, cabacCtx_.data(),
                                                               chromaCtxInc);
         cabacNeighbor_[mbIdx].chromaMode = static_cast<uint8_t>(chromaPredMode);
 
-        // CBP via CABAC — §9.3.3.1.1.4 with per-block neighbor CBP
+        // CBP via CABAC â€” Â§9.3.3.1.1.4 with per-block neighbor CBP
         auto cbpN = cabacNeighbor_.cbpNeighbors(mbX, mbY);
         uint8_t cbp = cabacDecodeCbp(cabacEngine_, cabacCtx_.data(),
                                       cbpN.left & 0x0FU, cbpN.top & 0x0FU,
@@ -2796,19 +2892,19 @@ private:
         uint8_t cbpChroma = (cbp >> 4U) & 0x03U;
         cabacNeighbor_[mbIdx].cbp = cbp;
 
-        // §7.3.5: mb_qp_delta ae(v) — only if cbp > 0 for I_NxN (NOT always like I_16x16).
-        // §9.3.3.1.1.5: when mb_qp_delta is NOT decoded (i.e. cbp==0), the
-        // syntax element is treated as having value 0 → reset prevHadDelta to
+        // Â§7.3.5: mb_qp_delta ae(v) â€” only if cbp > 0 for I_NxN (NOT always like I_16x16).
+        // Â§9.3.3.1.1.5: when mb_qp_delta is NOT decoded (i.e. cbp==0), the
+        // syntax element is treated as having value 0 â†’ reset prevHadDelta to
         // false. Verified bit-exact against JM read_dQuant_CABAC + the
         // `if (!cbp) last_dquant = 0;` reset in cabac.c L1298-1301.
-        // [CHECKED §7.3.5] (FM-3: cbp encodes both luma and chroma; cbp>0 correctly covers both.)
+        // [CHECKED Â§7.3.5] (FM-3: cbp encodes both luma and chroma; cbp>0 correctly covers both.)
         if (cbp > 0U)
         {
             int32_t qpDelta = cabacDecodeMbQpDelta(cabacEngine_, cabacCtx_.data(),
                                                     prevMbHadNonZeroQpDelta_);
             prevMbHadNonZeroQpDelta_ = (qpDelta != 0);
             qp += qpDelta;
-            qp = ((qp % 52) + 52) % 52; // §7.4.5: proper modular wrapping
+            qp = ((qp % 52) + 52) % 52; // Â§7.4.5: proper modular wrapping
         }
         else
         {
@@ -2823,13 +2919,13 @@ private:
             // binTrace moved to slice init
         }
 #endif
-        // Decode luma residual — §7.3.5.3
+        // Decode luma residual â€” Â§7.3.5.3
         uint8_t* mbLuma = activeFrame_->yMb(mbX, mbY);
         uint32_t yStride = activeFrame_->yStride();
 
         if (use8x8Transform)
         {
-            // I_8x8: 4 × 8x8 residual blocks — §7.3.5.3 with ctxBlockCat=5
+            // I_8x8: 4 Ã— 8x8 residual blocks â€” Â§7.3.5.3 with ctxBlockCat=5
             for (uint32_t blk8 = 0U; blk8 < 4U; ++blk8)
             {
                 uint32_t blkX = (blk8 & 1U) * 8U;
@@ -2838,7 +2934,7 @@ private:
                 uint32_t absY = mbY * cMbSize + blkY;
                 bool hasResidual = (cbpLuma >> blk8) & 1U;
 
-                // 8x8 intra prediction — §8.3.2 with reference sample filtering
+                // 8x8 intra prediction â€” Â§8.3.2 with reference sample filtering
                 // The prediction mode is stored in predModes[] at the top-left
                 // 4x4 sub-block of this 8x8 block.
                 static constexpr uint32_t c8x8TopLeft[4] = {0U, 2U, 8U, 10U};
@@ -2852,14 +2948,14 @@ private:
                 {
                     int16_t scanCoeffs[64] = {};
                     cabacDecodeResidual8x8(cabacEngine_, cabacCtx_.data(), scanCoeffs);
-                    // Reorder from 8x8 scan to raster via zigzag — §6.4.8
+                    // Reorder from 8x8 scan to raster via zigzag â€” Â§6.4.8
                     for (uint32_t k = 0U; k < 64U; ++k)
                         coeffs[cZigzag8x8[k]] = scanCoeffs[k];
                     dequantize8x8(coeffs, qp, false);
                 }
 
-                // §6.4.3: 8x8→4x4 raster index mapping. blk8 is in raster scan order:
-                // blk8=0→(0,0), blk8=1→(1,0), blk8=2→(0,1), blk8=3→(1,1)
+                // Â§6.4.3: 8x8â†’4x4 raster index mapping. blk8 is in raster scan order:
+                // blk8=0â†’(0,0), blk8=1â†’(1,0), blk8=2â†’(0,1), blk8=3â†’(1,1)
                 // base4x4 = top-left 4x4 raster index of the 8x8 block
                 uint32_t base4x4 = (blk8 >> 1U) * 8U + (blk8 & 1U) * 2U;
                 for (uint32_t dy = 0U; dy < 2U; ++dy)
@@ -2873,7 +2969,7 @@ private:
         }
         else
         {
-            // I_4x4: 16 × 4x4 residual blocks (spec scan order §6.4.3)
+            // I_4x4: 16 Ã— 4x4 residual blocks (spec scan order Â§6.4.3)
 #ifdef SUB0H264_P0_I8X8_DIAG
             if (mbY == 0U && mbX <= 16U)
                 std::fprintf(stderr, "[I_4x4] MB(%u,0) enter (cbpLuma=0x%x)\n",
@@ -2888,9 +2984,9 @@ private:
                 uint32_t absX = mbX * cMbSize + blkX;
                 uint32_t absY = mbY * cMbSize + blkY;
 
-                // §6.4.2: Availability of neighboring samples for intra prediction
-                // §8.3.1.2: Intra_4x4 prediction process
-                // §8.3.1.1: Reference sample availability (FM-16: uses activeFrame_, not currentFrame_)
+                // Â§6.4.2: Availability of neighboring samples for intra prediction
+                // Â§8.3.1.2: Intra_4x4 prediction process
+                // Â§8.3.1.1: Reference sample availability (FM-16: uses activeFrame_, not currentFrame_)
                 uint8_t pred4x4[16];
                 uint8_t topBuf[8], leftBuf[4], topLeftVal;
                 const uint8_t *top, *topRight, *left, *topLeft;
@@ -2899,19 +2995,19 @@ private:
                                         top, topRight, left, topLeft);
 
                 intraPred4x4(static_cast<Intra4x4Mode>(predModes[rasterIdx]), top, topRight, left, topLeft, pred4x4);
-                // (debug traces removed — see git history for investigation)
+                // (debug traces removed â€” see git history for investigation)
 
-                // §7.3.5.3: Residual data syntax — cbpLuma bit per 8x8 group
-                // §7.4.5: CodedBlockPatternLuma bit i corresponds to 8x8 block i
+                // Â§7.3.5.3: Residual data syntax â€” cbpLuma bit per 8x8 group
+                // Â§7.4.5: CodedBlockPatternLuma bit i corresponds to 8x8 block i
                 uint32_t group8x8 = blkIdx >> 2U;
                 bool hasResidual = (cbpLuma >> group8x8) & 1U;
 
                 int16_t coeffs[16] = {};
                 if (hasResidual)
                 {
-                    // §9.3.3.1.1.9: coded_block_flag ctxIdxInc for I_4x4 luma (cat 2)
-                    // Intra MB: unavailable → condTermFlag=1 (coded assumed). [CHECKED §9.3.3.1.1.9]
-                    uint32_t leftNnz = 1U, topNnz = 1U; // unavailable → coded (intra)
+                    // Â§9.3.3.1.1.9: coded_block_flag ctxIdxInc for I_4x4 luma (cat 2)
+                    // Intra MB: unavailable â†’ condTermFlag=1 (coded assumed). [CHECKED Â§9.3.3.1.1.9]
+                    uint32_t leftNnz = 1U, topNnz = 1U; // unavailable â†’ coded (intra)
                     if (rasterIdx % 4U > 0U)
                         leftNnz = nnzLuma_[mbIdx * 16U + rasterIdx - 1U];
                     else if (mbX > 0U)
@@ -3025,11 +3121,11 @@ private:
             }
         }
 
-        // Store pred modes for cross-MB MPM derivation (§8.3.1.1)
+        // Store pred modes for cross-MB MPM derivation (Â§8.3.1.1)
         for (uint32_t k = 0U; k < 16U; ++k)
             mbIntra4x4Modes_[mbIdx * 16U + k] = predModes[k];
 
-        // Chroma (use existing CAVLC chroma path — structure is the same,
+        // Chroma (use existing CAVLC chroma path â€” structure is the same,
         // only entropy coding differs. For CABAC chroma, use CABAC residual.)
         decodeChromaCabac(pps, chromaPredMode, cbpChroma, qp, mbX, mbY);
         return true;
@@ -3045,13 +3141,13 @@ private:
             std::fprintf(stderr, "[I_16x16] MB(%u,0) mbType=%u\n",
                          mbX, mbTypeRaw);
 #endif
-        // §7.3.5 macroblock_layer() sequencing for Intra_16x16 (CABAC): [CHECKED §7.3.5]
-        //   Step 1 — mb_type: decoded in caller (encodes predMode, cbpLuma, cbpChroma).
-        //   Step 2 — mb_pred: intra_chroma_pred_mode ae(v). [CHECKED §7.3.5.1]
-        //             NOTE (FM-3): coded_block_pattern ABSENT for I_16x16. [CHECKED §7.3.5]
-        //   Step 3 — mb_qp_delta ae(v): ALWAYS present for I_16x16. [CHECKED §7.3.5]
-        //   Step 4 — residual DC luma (always) + AC luma (if cbpLuma) +
-        //             chroma DC (if cbpChroma>=1) + chroma AC (if cbpChroma==2). [CHECKED §7.3.5.3]
+        // Â§7.3.5 macroblock_layer() sequencing for Intra_16x16 (CABAC): [CHECKED Â§7.3.5]
+        //   Step 1 â€” mb_type: decoded in caller (encodes predMode, cbpLuma, cbpChroma).
+        //   Step 2 â€” mb_pred: intra_chroma_pred_mode ae(v). [CHECKED Â§7.3.5.1]
+        //             NOTE (FM-3): coded_block_pattern ABSENT for I_16x16. [CHECKED Â§7.3.5]
+        //   Step 3 â€” mb_qp_delta ae(v): ALWAYS present for I_16x16. [CHECKED Â§7.3.5]
+        //   Step 4 â€” residual DC luma (always) + AC luma (if cbpLuma) +
+        //             chroma DC (if cbpChroma>=1) + chroma AC (if cbpChroma==2). [CHECKED Â§7.3.5.3]
         // Note: Used for both I-slices and intra-in-P-slices (neighbor context
         // handled by CabacNeighborCtx which tracks I_NxN per MB).
         (void)sps;
@@ -3063,13 +3159,13 @@ private:
         uint32_t mbIdx = mbY * widthInMbs_ + mbX;
         cabacNeighbor_[mbIdx].cbp = cbpLuma | (cbpChroma << 4U); // Store for neighbor context
         cabacNeighbor_[mbIdx].setI16x16(true);
-        // §9.3.3.1.1.7: intra_chroma_pred_mode — ctxInc from neighbor chroma modes
+        // Â§9.3.3.1.1.7: intra_chroma_pred_mode â€” ctxInc from neighbor chroma modes
         uint32_t chromaCtxInc = cabacNeighbor_.chromaModeCtxInc(mbX, mbY);
         uint32_t chromaPredMode = cabacDecodeIntraChromaMode(cabacEngine_, cabacCtx_.data(),
                                                               chromaCtxInc);
         cabacNeighbor_[mbIdx].chromaMode = static_cast<uint8_t>(chromaPredMode);
 
-        // §9.3.3.1.1.5: mb_qp_delta — ctxInc depends on previous MB's delta. [CHECKED §9.3.3.1.1.5]
+        // Â§9.3.3.1.1.5: mb_qp_delta â€” ctxInc depends on previous MB's delta. [CHECKED Â§9.3.3.1.1.5]
         int32_t qpDelta = cabacDecodeMbQpDelta(cabacEngine_, cabacCtx_.data(),
                                                 prevMbHadNonZeroQpDelta_);
         prevMbHadNonZeroQpDelta_ = (qpDelta != 0);
@@ -3092,12 +3188,12 @@ private:
 #endif
 
         // Decode DC block via CABAC (category 0 = Luma DC)
-        // §9.3.3.1.1.9: coded_block_flag for luma DC (ctxBlockCat=0).
+        // Â§9.3.3.1.1.9: coded_block_flag for luma DC (ctxBlockCat=0).
         // transBlockN = luma DC of neighbor IF neighbor is I_16x16.
         // condTermFlagN per spec:
-        //   - Unavailable + current Intra → 1
-        //   - Available + NOT I_16x16 → transBlock not available → 0
-        //   - Available + I_16x16 → actual coded_block_flag of luma DC
+        //   - Unavailable + current Intra â†’ 1
+        //   - Available + NOT I_16x16 â†’ transBlock not available â†’ 0
+        //   - Available + I_16x16 â†’ actual coded_block_flag of luma DC
         uint32_t dcCbfCtxInc = cabacNeighbor_.lumaDcCbfCtxInc(mbX, mbY, true);
         int16_t dcScan[16] = {};
         uint32_t dcNonZero = cabacDecodeResidual4x4(cabacEngine_, cabacCtx_.data(),
@@ -3125,7 +3221,7 @@ private:
 
         inverseHadamard4x4(dcCoeffs);
 
-        // §8.5.12.1: Intra16x16 luma DC dequant after Hadamard. Scaling list
+        // Â§8.5.12.1: Intra16x16 luma DC dequant after Hadamard. Scaling list
         // weightScale[0][0] applied via the dequant helper's second arg.
         dequantLumaDcValues(dcCoeffs, qp, scalingLists_.list4x4[0][0]);
 
@@ -3138,7 +3234,7 @@ private:
         }
 #endif
 
-        // Decode AC blocks (spec scan order §6.4.3)
+        // Decode AC blocks (spec scan order Â§6.4.3)
         uint8_t* mbLuma = activeFrame_->yMb(mbX, mbY);
         uint32_t yStride = activeFrame_->yStride();
 
@@ -3149,16 +3245,16 @@ private:
             uint32_t rasterIdx = cLuma4x4ToRaster[blkIdx];
 
             int16_t coeffs[16] = {};
-            // Hadamard output is in raster order — DC already dequantized above
+            // Hadamard output is in raster order â€” DC already dequantized above
             coeffs[0] = dcCoeffs[rasterIdx];
 
             if (cbpLuma)
             {
                 //TODO: We should consider splitting the AC decode into a separate function for clarity, since the DC decode is already handled via the Hadamard path and the AC decode has a different context derivation (cbfInc) than the I_4x4 case. This would also allow us to add more specific specification references for the AC decode logic, which is currently missing and important for validation.
-                // §9.3.3.1.1.9: coded_block_flag ctxIdxInc = condTermFlagA + 2*condTermFlagB
-                // Unavailable neighbors (edge of frame) → condTermFlag=1 (coded assumed).
-                // [CHECKED §9.3.3.1.1.9]
-                uint32_t leftNnz = 1U, topNnz = 1U; // default: unavailable → coded
+                // Â§9.3.3.1.1.9: coded_block_flag ctxIdxInc = condTermFlagA + 2*condTermFlagB
+                // Unavailable neighbors (edge of frame) â†’ condTermFlag=1 (coded assumed).
+                // [CHECKED Â§9.3.3.1.1.9]
+                uint32_t leftNnz = 1U, topNnz = 1U; // default: unavailable â†’ coded
                 if (rasterIdx % 4U > 0U)
                     leftNnz = nnzLuma_[mbIdx * 16U + rasterIdx - 1U];
                 else if (mbX > 0U)
@@ -3172,7 +3268,7 @@ private:
                 int16_t acScan[16] = {};
                 uint32_t numSig = cabacDecodeResidual4x4(cabacEngine_, cabacCtx_.data(),
                                                           acScan, 15U, 1U, cbfInc);
-                // AC coefficients in scan order 0..14 → raster positions via zigzag.
+                // AC coefficients in scan order 0..14 â†’ raster positions via zigzag.
                 // Zigzag indices 1..15 correspond to AC positions (skip DC at index 0).
                 for (uint32_t i = 0U; i < 15U; ++i)
                     coeffs[cZigzag4x4[i + 1U]] = acScan[i];
@@ -3180,7 +3276,7 @@ private:
             }
 
             // Save DC (already dequantized via Hadamard path), dequant AC, restore DC.
-            // §8.5.12.1: DC was scaled above; dequantize4x4 would re-dequant it.
+            // Â§8.5.12.1: DC was scaled above; dequantize4x4 would re-dequant it.
             int16_t savedDc = coeffs[0];
             dequantize4x4(coeffs, qp, Block4x4Plane::LumaIntra);
             coeffs[0] = savedDc;
@@ -3194,7 +3290,7 @@ private:
     }
 
     /** Decode P-inter MB with CABAC entropy.
-     *  @param mbQp  [in/out] Accumulated QP — ITU-T H.264 §7.4.5.
+     *  @param mbQp  [in/out] Accumulated QP â€” ITU-T H.264 Â§7.4.5.
      */
     void decodeCabacPInterMb(BitReader& br, const Sps& sps, const Pps& pps,
                               const SliceHeader& sh,
@@ -3202,37 +3298,37 @@ private:
                               Frame& target,
                               uint32_t mbX, uint32_t mbY) noexcept
     {
-        // §7.3.5 macroblock_layer() sequencing for P-inter (CABAC): [PARTIAL §7.3.5]
-        //   Step 1 — mb_type: decoded in caller (mbTypeRaw 0-4 for P-inter).
-        //   Step 2 — mb_pred (§7.3.5.1): [UNCHECKED §7.3.5.1]
-        //     FM-16: ref_idx_l0 NOT decoded — correct only when
-        //            num_ref_idx_l0_active_minus1 == 0 (§7.3.5.1 condition).
+        // Â§7.3.5 macroblock_layer() sequencing for P-inter (CABAC): [PARTIAL Â§7.3.5]
+        //   Step 1 â€” mb_type: decoded in caller (mbTypeRaw 0-4 for P-inter).
+        //   Step 2 â€” mb_pred (Â§7.3.5.1): [UNCHECKED Â§7.3.5.1]
+        //     FM-16: ref_idx_l0 NOT decoded â€” correct only when
+        //            num_ref_idx_l0_active_minus1 == 0 (Â§7.3.5.1 condition).
         //            Guarded by assert(sh.numRefIdxActiveL0_ <= 1U).
         //     FM-16: Only P_L0_16x16 handled; mbTypeRaw asserted == 0.
-        //   Step 3 — mc (16x16 only). [UNCHECKED §7.3.5]
-        //   Step 4 — coded_block_pattern ae(v): present for P-inter (not I_16x16). [CHECKED §7.3.5]
-        //   Step 5 — transform_size_8x8_flag ae(v) when cbpLuma>0 && 8x8mode. [CHECKED §7.3.5]
+        //   Step 3 â€” mc (16x16 only). [UNCHECKED Â§7.3.5]
+        //   Step 4 â€” coded_block_pattern ae(v): present for P-inter (not I_16x16). [CHECKED Â§7.3.5]
+        //   Step 5 â€” transform_size_8x8_flag ae(v) when cbpLuma>0 && 8x8mode. [CHECKED Â§7.3.5]
         //             Spec condition: CodedBlockPatternLuma>0 && transform_8x8_mode_flag
         //             && mb_type!=I_NxN && noSubMbPartSizeLessThan8x8Flag.
         //             For P_L0_16x16: noSubMbPartSizeLessThan8x8Flag=1 always.
-        //   Step 6 — mb_qp_delta ae(v): only if cbp > 0. [CHECKED §7.3.5]
-        //   Step 7 — residual(0,15). [CHECKED §7.3.5.3]
+        //   Step 6 â€” mb_qp_delta ae(v): only if cbp > 0. [CHECKED Â§7.3.5]
+        //   Step 7 â€” residual(0,15). [CHECKED Â§7.3.5.3]
 
         (void)br; (void)sps;
 
-        // §7.3.5.1 mb_pred / §7.3.5.2 sub_mb_pred for CABAC P-inter.
-        // Supports all partition types: 16x16, 16x8, 8x16, 8x8. [CHECKED §7.3.5]
+        // Â§7.3.5.1 mb_pred / Â§7.3.5.2 sub_mb_pred for CABAC P-inter.
+        // Supports all partition types: 16x16, 16x8, 8x16, 8x8. [CHECKED Â§7.3.5]
         uint32_t numParts = (mbTypeRaw == 0U) ? 1U : (mbTypeRaw <= 2U ? 2U : 4U);
         uint32_t numRefIdxL0Active = sh.numRefIdxActiveL0_;
         uint8_t refIdxL0[4] = {};
         int16_t mvdX[4] = {}, mvdY[4] = {};
-        // Per-sub-partition MVDs for P_8x8 — sub_mb_type != 0 uses 2 or 4 slots.
+        // Per-sub-partition MVDs for P_8x8 â€” sub_mb_type != 0 uses 2 or 4 slots.
         int16_t subMvdX[4][4] = {};
         int16_t subMvdY[4][4] = {};
         uint32_t subMbType[4] = {};
 
         // Sub-partition layout per sub_mb_type (offsets + size in 4x4 units
-        // relative to the 8x8 block TL). -1 marks unused slot. §7.3.5.2 /
+        // relative to the 8x8 block TL). -1 marks unused slot. Â§7.3.5.2 /
         // Table 7-13. Shared by MVD decode and MC dispatch.
         static constexpr int8_t cSubPartLayout[4][4][4] = {
             {{0, 0, 2, 2}, {-1, -1, -1, -1}, {-1, -1, -1, -1}, {-1, -1, -1, -1}},
@@ -3243,12 +3339,12 @@ private:
         const int32_t mb4x = static_cast<int32_t>(mbX) * 4;
         const int32_t mb4y = static_cast<int32_t>(mbY) * 4;
 
-        // §9.3.3.1.1.7 — MVD context: absMvdNeighbor = |mvdA[comp]| + |mvdB[comp]|
+        // Â§9.3.3.1.1.7 â€” MVD context: absMvdNeighbor = |mvdA[comp]| + |mvdB[comp]|
         // where A=left-neighbor partition, B=top-neighbor partition of the partition top-left.
         // Unified path: every MVD (both cross-MB and within-MB, including P_8x8
         // sub-partitions) has been stored to mbMotion_[].mvd by the time we
         // read a later neighbour. The .available flag is intentionally NOT
-        // checked here — within-MB partitions store .mvd before MC dispatch
+        // checked here â€” within-MB partitions store .mvd before MC dispatch
         // sets .available; out-of-frame coords return zero-init mvd via
         // getMotionAt4x4 (correct per spec). For intra/skip neighbours the
         // entry's mvd is 0, matching spec treatment.
@@ -3261,14 +3357,14 @@ private:
                  + std::abs(getMvdComp(tlX,     tlY - 1, xComp));  // top
         };
 
-        // §9.3.3.1.1.6: ref_idx context derivation — ctxInc from partition neighbors.
+        // Â§9.3.3.1.1.6: ref_idx context derivation â€” ctxInc from partition neighbors.
         // condTermFlagA = (refIdxA > 0), condTermFlagB = (refIdxB > 0).
         // Uses 4x4-block-level neighbor lookup (same as JM's get4x4Neighbour).
-        // Unavailable neighbors → condTermFlag = 0. [CHECKED §9.3.3.1.1.6]
+        // Unavailable neighbors â†’ condTermFlag = 0. [CHECKED Â§9.3.3.1.1.6]
         auto refIdxCtxInc = [&](int32_t tlX, int32_t tlY) -> uint32_t {
-            // §9.3.3.1.1.6 condTermN: 0 if unavailable, intra, or refIdx==0;
+            // Â§9.3.3.1.1.6 condTermN: 0 if unavailable, intra, or refIdx==0;
             // 1 otherwise. Intra/unavailable have refIdx=-1 (zero-init), so
-            // refIdx > 0 alone correctly excludes all three cases — no need
+            // refIdx > 0 alone correctly excludes all three cases â€” no need
             // to gate on `.available`. (This matters for P_8x8 sub-partitions
             // that have refIdx written early but `available` set only after
             // MC, so neighbour MV prediction sees C unavailable until ready.)
@@ -3281,9 +3377,9 @@ private:
 
         if (mbTypeRaw <= 2U)
         {
-            // 16x16 / 16x8 / 8x16: §7.3.5.1 ref_idx ALL first, then mvd ALL
+            // 16x16 / 16x8 / 8x16: Â§7.3.5.1 ref_idx ALL first, then mvd ALL
             // Store each refIdx immediately so the second partition's context
-            // derivation (§9.3.3.1.1.6) can see the first partition's refIdx.
+            // derivation (Â§9.3.3.1.1.6) can see the first partition's refIdx.
             {
                 uint32_t mi = mbY * widthInMbs_ + mbX;
                 for (uint32_t p = 0U; p < numParts; ++p)
@@ -3334,14 +3430,14 @@ private:
             //   8x16  (p=0): (mb4x, mb4y),   (p=1): (mb4x+2, mb4y)
             for (uint32_t p = 0U; p < numParts; ++p)
             {
-                int32_t tlX = mb4x + (mbTypeRaw == 2U && p == 1U ? 2 : 0); // 8x16 p1 → col+2
-                int32_t tlY = mb4y + (mbTypeRaw == 1U && p == 1U ? 2 : 0); // 16x8 p1 → row+2
+                int32_t tlX = mb4x + (mbTypeRaw == 2U && p == 1U ? 2 : 0); // 8x16 p1 â†’ col+2
+                int32_t tlY = mb4y + (mbTypeRaw == 1U && p == 1U ? 2 : 0); // 16x8 p1 â†’ row+2
                 int32_t nbrX = absMvdNbr(tlX, tlY, true);
                 int32_t nbrY = absMvdNbr(tlX, tlY, false);
                 mvdX[p] = cabacDecodeMvd(cabacEngine_, cabacCtx_.data(), cCtxMvdX, nbrX);
                 mvdY[p] = cabacDecodeMvd(cabacEngine_, cabacCtx_.data(), cCtxMvdY, nbrY);
                 // Store partition 0's MVD to mbMotion_ so partition 1's context
-                // lookup (via getMvdComp → getMotionAt4x4) picks it up.
+                // lookup (via getMvdComp â†’ getMotionAt4x4) picks it up.
                 uint32_t mi = mbY * widthInMbs_ + mbX;
                 uint32_t r0 = 0U, r1 = 4U, c0 = 0U, c1 = 4U;
                 if (mbTypeRaw == 1U) { r0 = p * 2U; r1 = r0 + 2U; }        // 16x8
@@ -3353,15 +3449,15 @@ private:
         }
         else
         {
-            // P_8x8: §7.3.5.2 sub_mb_type ALL, then ref_idx ALL, then mvd ALL
+            // P_8x8: Â§7.3.5.2 sub_mb_type ALL, then ref_idx ALL, then mvd ALL
             for (uint32_t s = 0U; s < 4U; ++s)
                 subMbType[s] = cabacDecodeSubMbTypeP(cabacEngine_, cabacCtx_.data());
             // P_8x8 sub-partition origins in 4x4 units: (0,0),(2,0),(0,2),(2,2)
             static constexpr int32_t c8x8Off4x[4] = {0, 2, 0, 2};
             static constexpr int32_t c8x8Off4y[4] = {0, 0, 2, 2};
-            // ref_idx per sub-partition — §7.3.5.2
+            // ref_idx per sub-partition â€” Â§7.3.5.2
             // Must store each refIdx immediately so subsequent sub-partitions
-            // can use it for context derivation (§9.3.3.1.1.6 needs neighbor refIdx).
+            // can use it for context derivation (Â§9.3.3.1.1.6 needs neighbor refIdx).
             for (uint32_t s = 0U; s < 4U; ++s)
             {
                 if (numRefIdxL0Active > 1U)
@@ -3385,7 +3481,7 @@ private:
                 }
                 // Store refIdx (only) to mbMotion_ so neighbour refIdx
                 // context (refIdxCtxInc) sees it during decode.
-                // CRITICAL: do NOT set .available here — that field gates the
+                // CRITICAL: do NOT set .available here â€” that field gates the
                 // C-neighbour MV-predictor lookup, and the MV isn't computed
                 // until doPartitionMC runs. Setting available=true with
                 // mv={0,0} causes downstream sub-partitions to read a bogus
@@ -3399,7 +3495,7 @@ private:
                     for (uint32_t cc = sc; cc < sc + 2U; ++cc)
                         mbMotion_[mi * 16U + r * 4U + cc].refIdx = ri;
             }
-            // MVD per sub-partition — §7.3.5.2 / §9.3.3.1.1.7.
+            // MVD per sub-partition â€” Â§7.3.5.2 / Â§9.3.3.1.1.7.
             uint32_t mi = mbY * widthInMbs_ + mbX;
             for (uint32_t s = 0U; s < 4U; ++s)
             {
@@ -3416,7 +3512,7 @@ private:
                     int32_t spH4   = cSubPartLayout[subMbType[s]][sp][3];
                     int32_t tlX    = mb4x + c8x8Off4x[s] + spOffX;
                     int32_t tlY    = mb4y + c8x8Off4y[s] + spOffY;
-                    // Neighbor MVDs from actual 4x4 block positions — the
+                    // Neighbor MVDs from actual 4x4 block positions â€” the
                     // previous sub-partition's MVD (within this MB) has been
                     // stored in mbMotion_ already, so absMvdNbr picks it up.
                     int32_t ctxX = absMvdNbr(tlX, tlY, true);
@@ -3440,7 +3536,7 @@ private:
             }
         }
 
-        // MV prediction + MC — same logic as CAVLC path (§8.4.1.3)
+        // MV prediction + MC â€” same logic as CAVLC path (Â§8.4.1.3)
         // mb4x/mb4y declared earlier for MVD context derivation
         uint32_t mbIdx = mbY * widthInMbs_ + mbX;
 
@@ -3449,7 +3545,7 @@ private:
         std::memset(predU, 128U, 64U);
         std::memset(predV, 128U, 64U);
 
-        // Per-partition reference lookup via DPB L0 list — §8.4.2
+        // Per-partition reference lookup via DPB L0 list â€” Â§8.4.2
         auto getRef = [this](uint8_t idx) -> const Frame& {
             const Frame* f = dpb_.getReference(idx);
             if (!f) f = dpb_.getReference(0U);
@@ -3464,7 +3560,7 @@ private:
         {
             const Frame& ref = getRef(partRefIdx);
 
-            // MV predictor — same neighbor lookup as CAVLC
+            // MV predictor â€” same neighbor lookup as CAVLC
             MbMotionInfo a = getMotionAt4x4(mb4x + static_cast<int32_t>(partX) / 4 - 1,
                                              mb4y + static_cast<int32_t>(partY) / 4);
             MbMotionInfo b = getMotionAt4x4(mb4x + static_cast<int32_t>(partX) / 4,
@@ -3477,7 +3573,7 @@ private:
 
             int8_t ri = static_cast<int8_t>(partRefIdx);
             MotionVector mvp;
-            // §8.4.1.3 directional shortcuts
+            // Â§8.4.1.3 directional shortcuts
             if (mbTypeRaw == 1U && partIdx == 0U && b.available && b.refIdx == ri)
                 mvp = b.mv;
             else if (mbTypeRaw == 1U && partIdx == 1U && a.available && a.refIdx == ri)
@@ -3493,7 +3589,7 @@ private:
                                 static_cast<int16_t>(mvp.y + partMvdY) };
 
             // Store MV per-4x4-block across exactly the partition's footprint
-            // — this matches sub-partitions of P_8x8 (8x4/4x8/4x4) which need
+            // â€” this matches sub-partitions of P_8x8 (8x4/4x8/4x4) which need
             // finer-grained coverage than setPartitionMotion's 2x2 block grid.
             {
                 MbMotionInfo info = { mv, {partMvdX, partMvdY}, ri, true };
@@ -3568,7 +3664,7 @@ private:
 
                 for (uint32_t sp = 0U; sp < numSubParts; ++sp)
                 {
-                    // Offset + size within 8x8 block (4x4 units) → pixels.
+                    // Offset + size within 8x8 block (4x4 units) â†’ pixels.
                     uint32_t subX = c8x8X[s] + cSubPartLayout[subMbType[s]][sp][0] * 4U;
                     uint32_t subY = c8x8Y[s] + cSubPartLayout[subMbType[s]][sp][1] * 4U;
                     uint32_t subW = cSubPartLayout[subMbType[s]][sp][2] * 4U;
@@ -3580,8 +3676,8 @@ private:
             }
         }
 
-        // §7.3.5: coded_block_pattern ae(v) for P-inter. [CHECKED §7.3.5]
-        // §9.3.3.1.1.4: ctxIdxInc derived from left/top neighbor CBP flags.
+        // Â§7.3.5: coded_block_pattern ae(v) for P-inter. [CHECKED Â§7.3.5]
+        // Â§9.3.3.1.1.4: ctxIdxInc derived from left/top neighbor CBP flags.
         uint8_t cbp;
         {
             auto cbpN = cabacNeighbor_.cbpNeighbors(mbX, mbY);
@@ -3593,13 +3689,13 @@ private:
         uint8_t cbpChroma = (cbp >> 4U) & 0x03U;
         cabacNeighbor_[mbIdx].cbp = cbp;
 
-        // §7.3.5: transform_size_8x8_flag ae(v) after CBP for P-inter. [CHECKED §7.3.5]
-        // Condition per spec §7.3.5: CodedBlockPatternLuma>0 && transform_8x8_mode_flag
+        // Â§7.3.5: transform_size_8x8_flag ae(v) after CBP for P-inter. [CHECKED Â§7.3.5]
+        // Condition per spec Â§7.3.5: CodedBlockPatternLuma>0 && transform_8x8_mode_flag
         //   && mb_type!=I_NxN && noSubMbPartSizeLessThan8x8Flag.
-        // §7.3.5 noSubMbPartSizeLessThan8x8Flag:
+        // Â§7.3.5 noSubMbPartSizeLessThan8x8Flag:
         //   Non-8x8 partition types (16x16, 16x8, 8x16): always 1 (no sub-partitions).
         //   P_8x8: 0 if any sub-partition has width<8 or height<8 (subMbType 1,2,3).
-        //          1 only if all 4 sub-partitions are 8x8 (subMbType == 0). [CHECKED §7.3.5]
+        //          1 only if all 4 sub-partitions are 8x8 (subMbType == 0). [CHECKED Â§7.3.5]
         bool noSubMbPartSizeLessThan8x8Flag = true;
         if (mbTypeRaw == 3U) // P_8x8
         {
@@ -3611,9 +3707,9 @@ private:
             use8x8Inter = decodeCabacTransform8x8Flag(mbX, mbY, mbIdx);
         mbTransform8x8_[mbIdx] = use8x8Inter ? 1U : 0U;
 
-        // §7.3.5: mb_qp_delta ae(v) — only if cbp > 0 for P-inter. [CHECKED §7.3.5]
-        // §9.3.3.1.1.5 / JM cabac.c L1298-1301: when cbp==0 the syntax element
-        // is absent (treated as 0) → reset prevHadDelta to false so the next
+        // Â§7.3.5: mb_qp_delta ae(v) â€” only if cbp > 0 for P-inter. [CHECKED Â§7.3.5]
+        // Â§9.3.3.1.1.5 / JM cabac.c L1298-1301: when cbp==0 the syntax element
+        // is absent (treated as 0) â†’ reset prevHadDelta to false so the next
         // MB's mb_qp_delta bin0 uses ctxInc=0.
         int32_t qp = mbQp;
         if (cbp > 0U)
@@ -3622,7 +3718,7 @@ private:
                                                     prevMbHadNonZeroQpDelta_);
             prevMbHadNonZeroQpDelta_ = (qpDelta != 0);
             qp += qpDelta;
-            qp = ((qp % 52) + 52) % 52; // §7.4.5: proper modular wrapping
+            qp = ((qp % 52) + 52) % 52; // Â§7.4.5: proper modular wrapping
         }
         else
         {
@@ -3630,12 +3726,12 @@ private:
         }
         mbQp = qp; // Propagate accumulated QP
 
-        // §7.3.5.3: residual(0,15) — luma then chroma. [CHECKED §7.3.5.3]
+        // Â§7.3.5.3: residual(0,15) â€” luma then chroma. [CHECKED Â§7.3.5.3]
         uint32_t yStride = target.yStride();
 
         if (use8x8Inter)
         {
-            // 8x8 inter transform — §7.3.5.3 with ctxBlockCat=5
+            // 8x8 inter transform â€” Â§7.3.5.3 with ctxBlockCat=5
             for (uint32_t blk8 = 0U; blk8 < 4U; ++blk8)
             {
                 uint32_t blkX = (blk8 & 1U) * 8U;
@@ -3665,7 +3761,7 @@ private:
         }
         else
         {
-            // 4x4 inter transform (spec scan order §6.4.3)
+            // 4x4 inter transform (spec scan order Â§6.4.3)
             for (uint32_t blkIdx = 0U; blkIdx < 16U; ++blkIdx)
             {
                 uint32_t blkX = cLuma4x4BlkX[blkIdx];
@@ -3676,12 +3772,12 @@ private:
                 int16_t coeffs[16] = {};
                 if ((cbpLuma >> group8x8) & 1U)
                 {
-                    // §9.3.3.1.1.9: coded_block_flag ctxIdxInc for luma 4x4 (cat 2)
-                    // For P-inter: unavailable neighbor → condTermFlag=0 (verified empirically).
-                    // NOTE: spec §9.3.3.1.1.9 says condTermFlag=1 for ctxBlockCat<5, but
-                    // that is the intra interpretation — for inter the effective behavior is 0.
-                    // [TODO: verify against reference encoder output vs spec §9.3.3.1.1.9]
-                    uint32_t leftNnz = 0U, topNnz = 0U; // unavailable → 0 for P-inter (empirical)
+                    // Â§9.3.3.1.1.9: coded_block_flag ctxIdxInc for luma 4x4 (cat 2)
+                    // For P-inter: unavailable neighbor â†’ condTermFlag=0 (verified empirically).
+                    // NOTE: spec Â§9.3.3.1.1.9 says condTermFlag=1 for ctxBlockCat<5, but
+                    // that is the intra interpretation â€” for inter the effective behavior is 0.
+                    // [TODO: verify against reference encoder output vs spec Â§9.3.3.1.1.9]
+                    uint32_t leftNnz = 0U, topNnz = 0U; // unavailable â†’ 0 for P-inter (empirical)
                     if (rasterIdx % 4U > 0U)
                         leftNnz = nnzLuma_[mbIdx * 16U + rasterIdx - 1U];
                     else if (mbX > 0U)
@@ -3695,7 +3791,7 @@ private:
                     int16_t scanCoeffs[16] = {};
                     uint32_t numNonZero = cabacDecodeResidual4x4(cabacEngine_, cabacCtx_.data(),
                                                                   scanCoeffs, 16U, 2U, cbfCtxInc);
-                    // §6.4.3 unscan zigzag → raster order BEFORE dequant/IDCT.
+                    // Â§6.4.3 unscan zigzag â†’ raster order BEFORE dequant/IDCT.
                     for (uint32_t k = 0U; k < 16U; ++k)
                         coeffs[cZigzag4x4[k]] = scanCoeffs[k];
                     nnzLuma_[mbIdx * 16U + rasterIdx] = (numNonZero > 0U) ? 1U : 0U;
@@ -3713,10 +3809,10 @@ private:
         }
 
         // Chroma residual
-        // §7.4.2.2 Chroma QP (FM-10: must use chromaQp, not luma QP)
+        // Â§7.4.2.2 Chroma QP (FM-10: must use chromaQp, not luma QP)
         int32_t chromaQp = computeChromaQp(qp, pps.chromaQpIndexOffset_);
 
-        // §9.3.3.1.1.9: chroma DC cbf context — uses actual neighbor CBF.
+        // Â§9.3.3.1.1.9: chroma DC cbf context â€” uses actual neighbor CBF.
         // P-inter current MB is NOT intra.
         uint32_t cbDcCbfInc2 = cabacNeighbor_.chromaDcCbfCtxInc(mbX, mbY, false, true);
         uint32_t crDcCbfInc2 = cabacNeighbor_.chromaDcCbfCtxInc(mbX, mbY, false, false);
@@ -3733,12 +3829,12 @@ private:
             inverseHadamard2x2(dcCb);
             inverseHadamard2x2(dcCr);
 
-            // CABAC P-inter chroma DC → CbInter/CrInter weightScale[0][0].
+            // CABAC P-inter chroma DC â†’ CbInter/CrInter weightScale[0][0].
             dequantChromaDcValues(dcCb, chromaQp, scalingLists_.list4x4[4][0]);
             dequantChromaDcValues(dcCr, chromaQp, scalingLists_.list4x4[5][0]);
         }
 
-        // §7.3.5.3: Chroma AC — ALL Cb first, then ALL Cr. Same order fix as intra.
+        // Â§7.3.5.3: Chroma AC â€” ALL Cb first, then ALL Cr. Same order fix as intra.
         int16_t cbAcPInter[4][16] = {}, crAcPInter[4][16] = {};
         if (cbpChroma >= 2U)
         {
@@ -3804,12 +3900,12 @@ private:
         intraPredChroma8x8(chromaMode, *activeFrame_, mbX, mbY, true, predU);
         intraPredChroma8x8(chromaMode, *activeFrame_, mbX, mbY, false, predV);
 
-        // §7.4.2.2 Chroma QP (FM-10: must use chromaQp, not luma QP)
+        // Â§7.4.2.2 Chroma QP (FM-10: must use chromaQp, not luma QP)
         int32_t chromaQp = computeChromaQp(qp, pps.chromaQpIndexOffset_);
 
         uint32_t mbIdx = mbY * widthInMbs_ + mbX;
 
-        // §9.3.3.1.1.9: chroma DC cbf context — uses actual neighbor CBF.
+        // Â§9.3.3.1.1.9: chroma DC cbf context â€” uses actual neighbor CBF.
         // transBlockN available when neighbor not skip/I_PCM AND CodedBlockPatternChroma != 0.
         uint32_t cbDcCbfInc = cabacNeighbor_.chromaDcCbfCtxInc(mbX, mbY, true, true);
         uint32_t crDcCbfInc = cabacNeighbor_.chromaDcCbfCtxInc(mbX, mbY, true, false);
@@ -3826,14 +3922,14 @@ private:
             inverseHadamard2x2(dcCb);
             inverseHadamard2x2(dcCr);
 
-            // Intra chroma DC → CbIntra/CrIntra weightScale[0][0].
+            // Intra chroma DC â†’ CbIntra/CrIntra weightScale[0][0].
             dequantChromaDcValues(dcCb, chromaQp, scalingLists_.list4x4[1][0]);
             dequantChromaDcValues(dcCr, chromaQp, scalingLists_.list4x4[2][0]);
         }
 
-        // §7.3.5.3: Chroma AC decode — ALL Cb blocks first, then ALL Cr blocks.
+        // Â§7.3.5.3: Chroma AC decode â€” ALL Cb blocks first, then ALL Cr blocks.
         // Spec loop: for(iCbCr=0..1) for(i4x4=0..3) residual_block_cabac().
-        // MUST NOT interleave Cb/Cr — that desyncs the CABAC engine.
+        // MUST NOT interleave Cb/Cr â€” that desyncs the CABAC engine.
         int16_t cbAcCoeffs[4][16] = {}, crAcCoeffs[4][16] = {};
         if (cbpChroma >= 2U)
         {
@@ -3859,7 +3955,7 @@ private:
             }
         }
 
-        // Reconstruct chroma — dequant AC, preserve DC, IDCT+pred
+        // Reconstruct chroma â€” dequant AC, preserve DC, IDCT+pred
         uint8_t* mbU = activeFrame_->uMb(mbX, mbY);
         uint8_t* mbV = activeFrame_->vMb(mbX, mbY);
         uint32_t uvStride = activeFrame_->uvStride();
@@ -3894,3 +3990,6 @@ private:
 } // namespace sub0h264
 
 #endif // CROG_SUB0H264_DECODER_HPP
+
+
+

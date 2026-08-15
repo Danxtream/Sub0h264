@@ -366,3 +366,4 @@ int main(int argc, char** argv)
     std::printf("\nDecoded %u frames.\n", frameCount);
     return 0;
 }
+
